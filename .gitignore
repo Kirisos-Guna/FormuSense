@@ -1,0 +1,36 @@
+# Local secrets / runtime config (the vision API keys are read from the
+# environment, never from a file that could be committed)
+config.local.json
+.env
+
+# Runtime record (recreated with: python run.py --seed)
+app/data/formusense.db
+app/data/formusense.db-shm
+app/data/formusense.db-wal
+
+# Generated report figures (recreated with: python run.py --report)
+app/data/figures/
+
+# Dev-server access log
+formusense.log
+
+# Office lock files (~$name.docx) left behind while a document is open
+~$*
+
+# Local tool metadata, not part of the project
+.freebuff/
+
+# The report itself is a deliverable and is kept in the repository:
+#   report/Internship_Report.docx | .html | .md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

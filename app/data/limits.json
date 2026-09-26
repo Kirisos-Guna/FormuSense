@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "name": "FormuSense regulatory constraint reference",
+    "version": "1.0",
+    "status": "INDICATIVE - configurable rule set",
+    "disclaimer": "Thresholds below reproduce widely used FSSAI / Codex-style claim conventions and typical permitted additive levels. They are stored as editable configuration so a formulation team can align them with the current gazette/regulation for the target market before filing. The system treats them as hard constraints; it does not claim to certify compliance."
+  },
+  "claims": [
+    {"id": "high_protein", "label": "High protein", "nutrient": "protein_g", "op": ">=", "value": 10.0, "unit": "g/100 g"},
+    {"id": "source_protein", "label": "Source of protein", "nutrient": "protein_g", "op": ">=", "value": 5.0, "unit": "g/100 g"},
+    {"id": "high_fibre", "label": "High fibre", "nutrient": "fibre_g", "op": ">=", "value": 6.0, "unit": "g/100 g"},
+    {"id": "source_fibre", "label": "Source of fibre", "nutrient": "fibre_g", "op": ">=", "value": 3.0, "unit": "g/100 g"},
+    {"id": "low_sugar", "label": "Low sugar", "nutrient": "sugar_g", "op": "<=", "value": 5.0, "unit": "g/100 g"},
+    {"id": "sugar_free", "label": "Sugar free", "nutrient": "sugar_g", "op": "<=", "value": 0.5, "unit": "g/100 g"},
+    {"id": "reduced_sugar", "label": "Reduced sugar (>=25% less than reference)", "nutrient": "sugar_g", "op": "<=", "value": 15.0, "unit": "g/100 g"},
+    {"id": "low_sodium", "label": "Low sodium", "nutrient": "sodium_mg", "op": "<=", "value": 120.0, "unit": "mg/100 g"},
+    {"id": "low_fat", "label": "Low fat", "nutrient": "fat_g", "op": "<=", "value": 3.0, "unit": "g/100 g"},
+    {"id": "high_energy", "label": "High energy (energy dense)", "nutrient": "energy_kcal", "op": ">=", "value": 400.0, "unit": "kcal/100 g"}
+  ],
+  "category_additive_limits": {
+    "cookie": {"preservative_ppm_max": 1000, "sweetener_intense": "not permitted in biscuits in many markets - verify", "colour": "natural colours preferred"},
+    "spread": {"preservative_ppm_max": 200, "preservative_note": "sorbate/benzoate class II preservative; benzoate only in acidic products", "sweetener_intense": "permitted in specified low-calorie categories", "colour": "permitted colours only"},
+    "drymix": {"preservative_ppm_max": 1000, "sweetener_intense": "verify per category", "colour": "natural colours preferred"},
+    "extruded_snack": {"preservative_ppm_max": 1000, "sweetener_intense": "verify per category", "colour": "permitted colours only"},
+    "bar": {"preservative_ppm_max": 1000, "sweetener_intense": "verify per category", "colour": "natural colours preferred"},
+    "sauce": {"preservative_ppm_max": 250, "preservative_note": "acidified sauce - benzoate/sorbate in acidic range", "colour": "permitted colours only"}
+  },
+  "allergens": [
+    {"id": "gluten", "label": "Cereals containing gluten", "declaration": "Contains wheat/gluten"},
+    {"id": "milk", "label": "Milk and milk products", "declaration": "Contains milk"},
+    {"id": "egg", "label": "Egg", "declaration": "Contains egg"},
+    {"id": "soy", "label": "Soybean", "declaration": "Contains soy"},
+    {"id": "peanut", "label": "Peanut", "declaration": "Contains peanut"},
+    {"id": "tree_nuts", "label": "Tree nuts", "declaration": "Contains tree nuts"},
+    {"id": "sesame", "label": "Sesame", "declaration": "Contains sesame"},
+    {"id": "mustard", "label": "Mustard", "declaration": "Contains mustard"}
+  ],
+  "microbial_safety_rules": [
+    {"id": "aw_dry", "condition": "water_activity <= 0.60", "implication": "Dry product - mould growth inhibited; control moisture pickup and packaging barrier.", "risk": "low"},
+    {"id": "aw_intermediate", "condition": "0.60 < water_activity <= 0.85", "implication": "Intermediate moisture - hurdle technology required (pH, preservative, aw, heat).", "risk": "medium"},
+    {"id": "aw_high", "condition": "water_activity > 0.85", "implication": "High moisture - requires refrigeration, sterilisation or acidification below pH 4.6.", "risk": "high"},
+    {"id": "acidified", "condition": "pH <= 4.6", "implication": "Acidified food - Clostridium botulinum vegetative growth inhibited when pH <= 4.6.", "risk": "low"},
+    {"id": "low_acid", "condition": "pH > 4.6 and water_activity > 0.85", "implication": "Low acid, high moisture - pathogen growth risk; requires a validated thermal process.", "risk": "high"}
+  ]
+}

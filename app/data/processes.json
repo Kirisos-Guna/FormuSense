@@ -1,0 +1,197 @@
+{
+  "_meta": {
+    "name": "FormuSense process & category library",
+    "version": "1.0",
+    "note": "Each category declares formulation slots (what kind of ingredient goes where and roughly how much), a unit-operation sequence and the process parameters the physics engine consumes. Parameter ids used by the engine: bake_temp_c, bake_time_min, water_added_pct, sheet_thickness_mm, cook_temp_c, cook_time_min, hot_fill_temp_c, blend_time_min, roast_temp_c, barrel_temp_c, screw_speed_rpm, feed_moisture_pct, dryer_temp_c, dryer_time_min, syrup_temp_c, cooling_temp_c."
+  },
+  "categories": {
+    "cookie": {
+      "label": "Cookie / biscuit",
+      "typical_moisture_pct": [1.5, 6.0],
+      "typical_aw": [0.15, 0.50],
+      "typical_unit_weight_g": 12,
+      "slots": [
+        {"id": "structure", "label": "Structure flour", "groups": ["grain"], "target": 40, "min": 28, "max": 55, "count": 2, "required": true},
+        {"id": "sweetener", "label": "Sweetener", "groups": ["sweetener"], "target": 22, "min": 8, "max": 34, "count": 2, "required": true},
+        {"id": "fat", "label": "Fat / shortening", "groups": ["fat"], "target": 17, "min": 8, "max": 30, "count": 2, "required": true},
+        {"id": "protein_boost", "label": "Protein source", "groups": ["protein"], "target": 8, "min": 0, "max": 22, "count": 2, "required": false},
+        {"id": "fibre", "label": "Fibre", "groups": ["fibre"], "target": 4, "min": 0, "max": 10, "count": 1, "required": false},
+        {"id": "inclusion", "label": "Nut / fruit inclusion", "groups": ["nut_seed", "fruit"], "target": 4, "min": 0, "max": 16, "count": 2, "required": false},
+        {"id": "hydrocolloid", "label": "Hydrocolloid / binder", "groups": ["hydrocolloid"], "target": 0.4, "min": 0, "max": 1.2, "count": 1, "required": false},
+        {"id": "emulsifier", "label": "Emulsifier", "groups": ["emulsifier"], "target": 0.3, "min": 0, "max": 1.0, "count": 1, "required": false},
+        {"id": "humectant", "label": "Humectant", "groups": ["humectant"], "target": 0.8, "min": 0, "max": 4.0, "count": 1, "required": false},
+        {"id": "leavening", "label": "Leavening", "groups": ["leavening"], "target": 0.9, "min": 0.3, "max": 1.8, "count": 1, "required": true},
+        {"id": "salt", "label": "Salt", "groups": ["salt_mineral"], "target": 0.6, "min": 0.3, "max": 1.4, "count": 1, "required": true},
+        {"id": "flavour", "label": "Flavour & colour", "groups": ["colour_flavour"], "target": 2.0, "min": 0.5, "max": 8.0, "count": 2, "required": false},
+        {"id": "preservative", "label": "Preservative", "groups": ["preservative"], "target": 0.0, "min": 0, "max": 0.3, "count": 1, "required": false},
+        {"id": "water", "label": "Process water", "groups": ["water"], "target": 4.0, "min": 0, "max": 14.0, "count": 1, "required": true}
+      ],
+      "parameters": [
+        {"id": "bake_temp_c", "label": "Bake temperature", "unit": "degC", "min": 150, "max": 210, "default": 175},
+        {"id": "bake_time_min", "label": "Bake time", "unit": "min", "min": 6, "max": 16, "default": 11},
+        {"id": "water_added_pct", "label": "Water added", "unit": "%", "min": 0, "max": 14, "default": 6},
+        {"id": "sheet_thickness_mm", "label": "Dough sheet thickness", "unit": "mm", "min": 4, "max": 9, "default": 6},
+        {"id": "cooling_temp_c", "label": "Cooling tunnel temperature", "unit": "degC", "min": 18, "max": 35, "default": 24}
+      ],
+      "unit_operations": [
+        {"op": "Ingredient sieving & weighing", "duration_min": 15, "equipment": "Vibro sifter, batch scale", "control": "Sieve 30 mesh; batch tolerance +/-0.5%"},
+        {"op": "Creaming (fat + sugar)", "duration_min": 5, "equipment": "Planetary mixer", "control": "Speed 2; aeration until light and pale"},
+        {"op": "Dough mixing", "duration_min": 7, "equipment": "Planetary / horizontal mixer", "control": "Develop short gluten; do not over-mix (dough temperature <= 28 degC)"},
+        {"op": "Sheeting & cutting", "duration_min": 10, "equipment": "Dough sheeter + rotary cutter", "control": "Uniform thickness; scrap recycled at <=10%"},
+        {"op": "Baking", "duration_min": 11, "equipment": "Tunnel / deck oven", "control": "Zone profile; bake to target moisture"},
+        {"op": "Cooling", "duration_min": 30, "equipment": "Cooling tunnel / ambient racks", "control": "Cool to <= 30 degC before packing"},
+        {"op": "Packaging", "duration_min": 10, "equipment": "Flow-wrap / pouch filler", "control": "Moisture barrier film; nitrogen flush optional"}
+      ]
+    },
+    "spread": {
+      "label": "Fruit spread / jam",
+      "typical_moisture_pct": [26, 40],
+      "typical_aw": [0.75, 0.88],
+      "typical_unit_weight_g": 200,
+      "slots": [
+        {"id": "fruit", "label": "Fruit base", "groups": ["fruit"], "target": 45, "min": 30, "max": 62, "count": 2, "required": true},
+        {"id": "sweetener", "label": "Sweetener", "groups": ["sweetener"], "target": 36, "min": 18, "max": 52, "count": 2, "required": true},
+        {"id": "humectant", "label": "Humectant", "groups": ["humectant"], "target": 1.5, "min": 0, "max": 6.0, "count": 1, "required": false},
+        {"id": "gelling", "label": "Gelling agent", "groups": ["hydrocolloid"], "target": 0.7, "min": 0.2, "max": 1.6, "count": 1, "required": true},
+        {"id": "acidulant", "label": "Acidulant", "groups": ["acidulant"], "target": 0.45, "min": 0.1, "max": 1.2, "count": 1, "required": true},
+        {"id": "preservative", "label": "Preservative", "groups": ["preservative"], "target": 0.05, "min": 0.0, "max": 0.1, "count": 1, "required": false},
+        {"id": "flavour", "label": "Flavour", "groups": ["colour_flavour"], "target": 0.3, "min": 0, "max": 1.0, "count": 1, "required": false},
+        {"id": "fortificant", "label": "Fortificant", "groups": ["fortificant"], "target": 0.1, "min": 0, "max": 0.6, "count": 1, "required": false},
+        {"id": "water", "label": "Process water", "groups": ["water"], "target": 12, "min": 0, "max": 25, "count": 1, "required": true}
+      ],
+      "parameters": [
+        {"id": "cook_temp_c", "label": "Cooking temperature", "unit": "degC", "min": 85, "max": 105, "default": 95},
+        {"id": "cook_time_min", "label": "Cooking time", "unit": "min", "min": 10, "max": 40, "default": 22},
+        {"id": "hot_fill_temp_c", "label": "Hot fill temperature", "unit": "degC", "min": 80, "max": 95, "default": 88},
+        {"id": "water_added_pct", "label": "Water added", "unit": "%", "min": 0, "max": 25, "default": 12}
+      ],
+      "unit_operations": [
+        {"op": "Fruit washing, sorting & pulping", "duration_min": 30, "equipment": "Pulper / fruit mill", "control": "Remove defects; pulp consistency check"},
+        {"op": "Dry blending of pectin with sugar", "duration_min": 10, "equipment": "Ribbon blender", "control": "Pectin pre-blended 1:5 with sugar to avoid lumps"},
+        {"op": "Cooking with sugar", "duration_min": 22, "equipment": "Steam jacketed kettle with agitator", "control": "Reach target total soluble solids; scrape surface"},
+        {"op": "Acid & preservative addition", "duration_min": 4, "equipment": "Dosing tank", "control": "Add acid last, at <= 60% of cook time remaining"},
+        {"op": "Hot filling", "duration_min": 8, "equipment": "Piston filler", "control": "Fill at >= 85 degC into pre-sterilised jars; invert for 2 min"},
+        {"op": "Cooling & labelling", "duration_min": 25, "equipment": "Cooling tunnel", "control": "Cool to ambient; check set before dispatch"}
+      ]
+    },
+    "drymix": {
+      "label": "Instant dry mix (porridge / beverage)",
+      "typical_moisture_pct": [4.0, 9.0],
+      "typical_aw": [0.25, 0.55],
+      "typical_unit_weight_g": 40,
+      "slots": [
+        {"id": "grain", "label": "Grain / cereal base", "groups": ["grain"], "target": 46, "min": 32, "max": 60, "count": 3, "required": true},
+        {"id": "protein", "label": "Protein source", "groups": ["protein"], "target": 14, "min": 4, "max": 28, "count": 2, "required": true},
+        {"id": "dairy", "label": "Dairy solids", "groups": ["dairy"], "target": 10, "min": 0, "max": 20, "count": 1, "required": false},
+        {"id": "sweetener", "label": "Sweetener", "groups": ["sweetener"], "target": 14, "min": 5, "max": 25, "count": 2, "required": true},
+        {"id": "fibre", "label": "Fibre", "groups": ["fibre"], "target": 4, "min": 0, "max": 10, "count": 1, "required": false},
+        {"id": "inclusion", "label": "Nut / fruit inclusion", "groups": ["nut_seed", "fruit"], "target": 5, "min": 0, "max": 14, "count": 2, "required": false},
+        {"id": "salt", "label": "Salt", "groups": ["salt_mineral"], "target": 0.5, "min": 0.2, "max": 1.2, "count": 1, "required": true},
+        {"id": "flavour", "label": "Flavour & colour", "groups": ["colour_flavour"], "target": 1.6, "min": 0.4, "max": 5.0, "count": 2, "required": true},
+        {"id": "fortificant", "label": "Fortificant premix", "groups": ["fortificant"], "target": 0.2, "min": 0, "max": 0.5, "count": 2, "required": false}
+      ],
+      "parameters": [
+        {"id": "blend_time_min", "label": "Dry blending time", "unit": "min", "min": 6, "max": 20, "default": 12},
+        {"id": "roast_temp_c", "label": "Roasting / conditioning temperature", "unit": "degC", "min": 0, "max": 160, "default": 120},
+        {"id": "particle_size_mm", "label": "Median particle size (D50)", "unit": "mm", "min": 0.25, "max": 1.20, "default": 0.60},
+        {"id": "water_added_pct", "label": "Water added", "unit": "%", "min": 0, "max": 6, "default": 0}
+      ],
+      "unit_operations": [
+        {"op": "Receiving & sieving of dry ingredients", "duration_min": 20, "equipment": "Sifter, magnetic separator", "control": "Reject metal/foreign matter; sieve 40 mesh"},
+        {"op": "Roasting / conditioning of grain base", "duration_min": 25, "equipment": "Rotary roaster", "control": "Develop flavour; moisture <= 5%"},
+        {"op": "Grinding & classification", "duration_min": 20, "equipment": "Hammer mill + classifier", "control": "Achieve target D50; avoid fines < 150 micron"},
+        {"op": "Dry blending", "duration_min": 12, "equipment": "Ribbon / paddle blender", "control": "Mix to CV < 5%; add premix by pre-dilution"},
+        {"op": "Filling & sealing", "duration_min": 12, "equipment": "Auger filler + pouching machine", "control": "Fill weight +/-2%; N2 flush for shelf life"}
+      ]
+    },
+    "extruded_snack": {
+      "label": "Extruded snack",
+      "typical_moisture_pct": [2.0, 5.0],
+      "typical_aw": [0.15, 0.45],
+      "typical_unit_weight_g": 30,
+      "slots": [
+        {"id": "grain", "label": "Grain base", "groups": ["grain"], "target": 52, "min": 38, "max": 65, "count": 3, "required": true},
+        {"id": "protein", "label": "Protein source", "groups": ["protein"], "target": 16, "min": 4, "max": 30, "count": 2, "required": true},
+        {"id": "fibre", "label": "Fibre", "groups": ["fibre"], "target": 5, "min": 0, "max": 12, "count": 1, "required": false},
+        {"id": "fat", "label": "Oil / seasoning fat", "groups": ["fat"], "target": 6, "min": 1, "max": 15, "count": 1, "required": true},
+        {"id": "salt", "label": "Salt", "groups": ["salt_mineral"], "target": 1.0, "min": 0.4, "max": 2.0, "count": 1, "required": true},
+        {"id": "flavour", "label": "Seasoning", "groups": ["colour_flavour"], "target": 4.0, "min": 1.0, "max": 9.0, "count": 2, "required": true},
+        {"id": "emulsifier", "label": "Emulsifier", "groups": ["emulsifier"], "target": 0.3, "min": 0, "max": 0.8, "count": 1, "required": false},
+        {"id": "water", "label": "Process water", "groups": ["water"], "target": 12, "min": 6, "max": 22, "count": 1, "required": true}
+      ],
+      "parameters": [
+        {"id": "barrel_temp_c", "label": "Extruder barrel temperature", "unit": "degC", "min": 110, "max": 175, "default": 145},
+        {"id": "screw_speed_rpm", "label": "Screw speed", "unit": "rpm", "min": 250, "max": 450, "default": 340},
+        {"id": "feed_moisture_pct", "label": "Feed moisture", "unit": "%", "min": 14, "max": 24, "default": 18},
+        {"id": "dryer_temp_c", "label": "Dryer temperature", "unit": "degC", "min": 90, "max": 140, "default": 115},
+        {"id": "dryer_time_min", "label": "Dryer residence time", "unit": "min", "min": 8, "max": 30, "default": 16}
+      ],
+      "unit_operations": [
+        {"op": "Dry blending of base", "duration_min": 12, "equipment": "Ribbon blender", "control": "Uniform premix before preconditioning"},
+        {"op": "Preconditioning", "duration_min": 5, "equipment": "Preconditioner", "control": "Steam/water addition to target feed moisture"},
+        {"op": "Extrusion cooking", "duration_min": 3, "equipment": "Twin-screw extruder", "control": "Barrel profile; SME target; die pressure stable"},
+        {"op": "Die cutting", "duration_min": 3, "equipment": "Face cutter", "control": "Uniform piece size; knife speed vs throughput"},
+        {"op": "Drying", "duration_min": 16, "equipment": "Continuous belt dryer", "control": "Dry to <= 4% moisture; avoid case hardening"},
+        {"op": "Seasoning tumble & packing", "duration_min": 12, "equipment": "Coating drum + VFFS", "control": "Oil-slurry seasoning; seal integrity test"}
+      ]
+    },
+    "bar": {
+      "label": "Nutrition / cereal bar",
+      "typical_moisture_pct": [8, 16],
+      "typical_aw": [0.55, 0.72],
+      "typical_unit_weight_g": 40,
+      "slots": [
+        {"id": "base", "label": "Cereal / binder base", "groups": ["grain", "fibre"], "target": 30, "min": 18, "max": 45, "count": 3, "required": true},
+        {"id": "protein", "label": "Protein source", "groups": ["protein", "dairy"], "target": 22, "min": 8, "max": 35, "count": 2, "required": true},
+        {"id": "syrup", "label": "Binding syrup", "groups": ["sweetener", "humectant"], "target": 28, "min": 16, "max": 38, "count": 3, "required": true},
+        {"id": "fat", "label": "Fat", "groups": ["fat"], "target": 6, "min": 1, "max": 14, "count": 1, "required": false},
+        {"id": "inclusion", "label": "Nut / fruit inclusion", "groups": ["nut_seed", "fruit"], "target": 10, "min": 0, "max": 22, "count": 3, "required": false},
+        {"id": "salt", "label": "Salt", "groups": ["salt_mineral"], "target": 0.4, "min": 0.15, "max": 1.0, "count": 1, "required": true},
+        {"id": "flavour", "label": "Flavour", "groups": ["colour_flavour"], "target": 1.2, "min": 0.2, "max": 4.0, "count": 1, "required": false},
+        {"id": "water", "label": "Process water", "groups": ["water"], "target": 4, "min": 0, "max": 10, "count": 1, "required": false}
+      ],
+      "parameters": [
+        {"id": "syrup_temp_c", "label": "Syrup cooking temperature", "unit": "degC", "min": 80, "max": 118, "default": 105},
+        {"id": "cooling_temp_c", "label": "Cooling tunnel temperature", "unit": "degC", "min": 5, "max": 25, "default": 12},
+        {"id": "water_added_pct", "label": "Water added", "unit": "%", "min": 0, "max": 10, "default": 4}
+      ],
+      "unit_operations": [
+        {"op": "Dry ingredient blending", "duration_min": 10, "equipment": "Ribbon blender", "control": "Even distribution of inclusions"},
+        {"op": "Syrup preparation", "duration_min": 15, "equipment": "Jacketed kettle", "control": "Dissolve solids fully; target solids and viscosity"},
+        {"op": "Wet mixing & forming", "duration_min": 8, "equipment": "Planetary mixer + slab former", "control": "Bind without crushing inclusions; uniform slab density"},
+        {"op": "Cooling & setting", "duration_min": 25, "equipment": "Cooling tunnel", "control": "Set slab to <= 20 degC before cutting"},
+        {"op": "Cutting & wrapping", "duration_min": 12, "equipment": "Guillotine cutter + flow wrap", "control": "Clean cut; weight control +/-3%"}
+      ]
+    },
+    "sauce": {
+      "label": "Sauce / chutney",
+      "typical_moisture_pct": [55, 72],
+      "typical_aw": [0.88, 0.95],
+      "typical_unit_weight_g": 200,
+      "slots": [
+        {"id": "base", "label": "Fruit / vegetable base", "groups": ["fruit"], "target": 42, "min": 28, "max": 60, "count": 2, "required": true},
+        {"id": "sweetener", "label": "Sweetener", "groups": ["sweetener"], "target": 18, "min": 6, "max": 30, "count": 1, "required": false},
+        {"id": "acidulant", "label": "Acidulant (vinegar / acid)", "groups": ["acidulant"], "target": 5.0, "min": 1.5, "max": 12, "count": 1, "required": true},
+        {"id": "thickener", "label": "Thickener / stabiliser", "groups": ["hydrocolloid", "grain"], "target": 1.4, "min": 0.4, "max": 3.5, "count": 2, "required": true},
+        {"id": "salt", "label": "Salt", "groups": ["salt_mineral"], "target": 1.5, "min": 0.6, "max": 2.6, "count": 1, "required": true},
+        {"id": "spice_flavour", "label": "Spice & flavour", "groups": ["colour_flavour"], "target": 3.0, "min": 1.0, "max": 8.0, "count": 2, "required": true},
+        {"id": "preservative", "label": "Preservative", "groups": ["preservative"], "target": 0.08, "min": 0.0, "max": 0.1, "count": 1, "required": false},
+        {"id": "water", "label": "Process water", "groups": ["water"], "target": 26, "min": 10, "max": 40, "count": 1, "required": true}
+      ],
+      "parameters": [
+        {"id": "cook_temp_c", "label": "Cooking temperature", "unit": "degC", "min": 85, "max": 102, "default": 95},
+        {"id": "cook_time_min", "label": "Cooking time", "unit": "min", "min": 8, "max": 35, "default": 18},
+        {"id": "homogenisation_bar", "label": "Homogenisation pressure", "unit": "bar", "min": 0, "max": 150, "default": 60},
+        {"id": "hot_fill_temp_c", "label": "Fill temperature", "unit": "degC", "min": 82, "max": 96, "default": 90},
+        {"id": "water_added_pct", "label": "Water added", "unit": "%", "min": 10, "max": 40, "default": 26}
+      ],
+      "unit_operations": [
+        {"op": "Vegetable/fruit preparation", "duration_min": 25, "equipment": "Washer, pulper", "control": "Remove seeds/skin; consistent pulp"},
+        {"op": "Spice roasting & grinding", "duration_min": 15, "equipment": "Roaster, pulveriser", "control": "Roast to aroma, avoid scorching"},
+        {"op": "Cooking & thickening", "duration_min": 18, "equipment": "Steam jacketed kettle", "control": "Add thickener slurry gradually; target viscosity"},
+        {"op": "Homogenisation", "duration_min": 6, "equipment": "High pressure homogeniser", "control": "Two-stage; smooth mouthfeel"},
+        {"op": "Hot filling & cooling", "duration_min": 20, "equipment": "Filler, cooling tunnel", "control": "Fill >= 88 degC; ensure seal sterility"}
+      ]
+    }
+  }
+}

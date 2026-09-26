@@ -1,0 +1,9 @@
+# Keep the working tree stable across platforms: text is stored with LF, so a
+# clone on Windows and a clone on Linux produce the same diff.
+* text=auto eol=lf
+
+# Binary artefacts: never touch these.
+*.png binary
+*.jpg binary
+*.docx binary
+*.db binary
