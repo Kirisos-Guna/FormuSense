@@ -180,7 +180,7 @@ app/db/                 dialect adapter (SQLite / PostgreSQL) and versioned migr
 app/config.py           environment-driven settings
 app/logging_setup.py    process logging and request ids
 app/data/               ingredients.json, processes.json, limits.json, dri_profiles.json, formusense.db, figures
-db/                     migrations/ (sqlite/ and postgres/), plus the adapter in app/db/
+app/db/                 dialect adapter (backend.py) and versioned migrations/{sqlite,postgres}
 Dockerfile              app image; requirements-optional.txt lists the optional extras
 app/plant.py            the simulated plant
 app/store.py            the SQLite record

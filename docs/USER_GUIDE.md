@@ -193,7 +193,7 @@ are optional and only draw the report's figures and code listings.
 | Header says *vision: image analysis off* | Image analysis needs the optional Pillow install. The rest of the pipeline does not. |
 | The Model tab is empty | No model has been trained in this database. Run `python run.py --build-dataset` then `python run.py --train`. |
 | A brief cannot be satisfied | That is a result, not a bug: the agent reports the target, the best achievable value and the reason instead of quietly missing it. |
-| A PostgreSQL error | The default is SQLite. PostgreSQL is opt-in through `FORMUSENSE_DB_URL`; migrations for both dialects live in `db/migrations/`. |
+| A PostgreSQL error | The default is SQLite. PostgreSQL is opt-in through `FORMUSENSE_DB_URL`; migrations for both dialects live in `app/db/migrations/`. |
 
 **What this app does not do.** It does not replace a pilot plant. Predictions,
 objectives and probabilities are model output with published intervals; the

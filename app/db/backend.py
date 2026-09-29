@@ -19,7 +19,9 @@ stays reviewable:
 * ``INSERT OR REPLACE`` on the versioned formulation table, which becomes
   ``INSERT ... ON CONFLICT (product_id, version) DO UPDATE``;
 * ``lastrowid``, which PostgreSQL does not populate, so the id is read back with
-  ``SELECT LASTVAL()`` immediately after an insert.
+  ``SELECT LASTVAL()`` immediately after an insert - but only for the tables that
+  own a sequence, because ``LASTVAL()`` raises otherwise and a raised statement
+  aborts the transaction it runs in.
 """
 from __future__ import annotations
 
@@ -29,7 +31,39 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 INSERT_OR_REPLACE = re.compile(r"^\s*INSERT\s+OR\s+REPLACE\s+INTO\s+formulations", re.IGNORECASE)
-INSERT_STATEMENT = re.compile(r"^\s*INSERT\s+INTO", re.IGNORECASE)
+INSERT_TABLE = re.compile(r"^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+#: The tables whose primary key is a sequence, so LASTVAL() can be asked for the
+#: id of the row just inserted. Anything else - the migration bookkeeping table,
+#: for instance - has no sequence, and asking raises: in PostgreSQL a raised
+#: statement aborts the whole transaction, which is how every fresh PostgreSQL
+#: startup used to fail while the SQLite path stayed green.
+SEQUENCED_TABLES = frozenset(
+    {
+        "products",
+        "formulations",
+        "predictions",
+        "trials",
+        "analyses",
+        "diagnoses",
+        "plans",
+        "ledger",
+        "benchmarks",
+    }
+)
+
+
+def _needs_lastval(statement: str) -> bool:
+    """Whether the id of the inserted row has to be read back with LASTVAL().
+
+    True only for an insert into a table that owns a sequence and that is not
+    already returning its own row. The probe is refused rather than attempted and
+    rolled back, because the failure of a statement poisons the transaction.
+    """
+    if "RETURNING" in statement.upper():
+        return False
+    match = INSERT_TABLE.match(statement)
+    return bool(match) and match.group(1).lower() in SEQUENCED_TABLES
 
 POSTGRES_DRIVER_HINT = (
     "PostgreSQL support needs a driver. Install one with:\n"
@@ -123,7 +157,7 @@ class PostgresConnection(Connection):
         statement = self._translate(sql)
         cursor = self.conn.cursor()
         cursor.execute(statement, tuple(params or ()))
-        if INSERT_STATEMENT.match(statement) and "RETURNING" not in statement.upper():
+        if _needs_lastval(statement):
             # psycopg does not populate lastrowid; LASTVAL() returns the value most
             # recently produced by a sequence in this session, which is exactly the
             # id the caller wants straight after an insert into a SERIAL column.

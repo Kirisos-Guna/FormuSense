@@ -8,6 +8,7 @@ unless a server is configured, so the suite passes on a clean checkout.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -55,6 +56,40 @@ class BackendTests(unittest.TestCase):
         self.assertIn("ON CONFLICT (product_id, version) DO UPDATE", translated)
         self.assertIn("%s", translated)
         self.assertNotIn("?", translated)
+
+    def test_lastval_is_only_probed_for_tables_that_own_a_sequence(self) -> None:
+        # Regression: the migration runner records itself in schema_migrations, which
+        # has no sequence. LASTVAL() raises there, and in PostgreSQL a raised statement
+        # aborts the transaction it runs in - so the probe has to be refused outright
+        # rather than attempted and rolled back. Every fresh PostgreSQL startup failed
+        # on this while the SQLite path stayed green, which is why CI caught it and the
+        # local suite could not.
+        self.assertFalse(
+            backend._needs_lastval("INSERT INTO schema_migrations (filename, applied_at) VALUES (%s,%s)")
+        )
+        self.assertFalse(backend._needs_lastval("SELECT LASTVAL()"))
+        self.assertFalse(backend._needs_lastval("INSERT INTO products (name) VALUES (%s) RETURNING id"))
+        for table in sorted(backend.SEQUENCED_TABLES):
+            self.assertTrue(
+                backend._needs_lastval(f"INSERT INTO {table} (a) VALUES (%s)"),
+                f"{table} owns a sequence, so its id has to be read back",
+            )
+        # The translated formulation upsert keeps probing, exactly as before.
+        upsert = PostgresConnection._translate(
+            "INSERT OR REPLACE INTO formulations (product_id, version) VALUES (?,?)"
+        )
+        self.assertTrue(backend._needs_lastval(upsert))
+
+    def test_every_table_the_store_inserts_into_is_known_to_be_sequenced(self) -> None:
+        # If the store starts inserting into a new table, the id read-back has to learn
+        # about it or the insert quietly stops returning an id on PostgreSQL.
+        source = (Path(__file__).resolve().parent.parent / "app" / "store.py").read_text(encoding="utf-8")
+        inserted = {
+            name.lower()
+            for name in re.findall(r"INSERT\s+(?:OR\s+REPLACE\s+)?INTO\s+([a-z_]+)", source, re.IGNORECASE)
+        }
+        self.assertTrue(inserted, "no INSERT statements found in app/store.py")
+        self.assertLessEqual(inserted, set(backend.SEQUENCED_TABLES))
 
     def test_a_comment_header_does_not_swallow_the_first_statement(self) -> None:
         # Regression: the migration files open with a `--` header, and a naive
