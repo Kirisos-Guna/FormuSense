@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FormuSense - AI Food Product Development Agent (PS-1)</title>
+<meta name="description" content="An offline agent that takes a food product from a written brief to a validated formulation in fewer physical trials. Python standard library only, no API keys.">
+<style>
+  :root { --bg: #f4f6f4; --panel: #fff; --ink: #172320; --muted: #5c6b62;
+          --line: #d8e0da; --accent: #1f7a4d; --warn-soft: #fdf1de; --warn: #b26a00; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); -webkit-text-size-adjust: 100%;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 2rem max(1.2rem, env(safe-area-inset-left)) 3rem max(1.2rem, env(safe-area-inset-right)); }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 1.2rem; }
+  .brand { display: flex; align-items: center; gap: .7rem; }
+  .logo { width: 40px; height: 40px; border-radius: 10px; background: var(--accent); color: #fff;
+          display: grid; place-items: center; font-weight: 700; font-size: 1.2rem; flex: 0 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0; } h2 { font-size: 1.1rem; margin: 2rem 0 .6rem; }
+  h3 { font-size: .95rem; margin: 0 0 .3rem; } p { margin: .5rem 0; }
+  .sub, .team { color: var(--muted); font-size: .87rem; }
+  .sub { margin: .15rem 0 0; } .team { margin: .9rem 0 0; }
+  a { color: var(--accent); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .86em; background: #eef2ef;
+         border: 1px solid var(--line); border-radius: 5px; padding: .05em .3em; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin: .6rem 0;
+        padding: .8rem .9rem; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  pre code { background: none; border: none; padding: 0; font-size: .84rem; line-height: 1.7; }
+  .note { border: 1px solid #efd7ad; background: var(--warn-soft); border-radius: 10px; padding: .8rem 1rem; margin: 1.2rem 0; }
+  .note strong { color: var(--warn); }
+  .grid { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+  .grid > * { min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .8rem .9rem; }
+  .card p { margin: .2rem 0 0; color: var(--muted); font-size: .88rem; }
+  .step { color: var(--accent); font-weight: 700; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; min-width: 30rem; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat { display: flex; flex-wrap: wrap; gap: .4rem 1.6rem; margin: .8rem 0 0; padding: 0;
+          list-style: none; font-size: .88rem; color: var(--muted); }
+  .stat b { color: var(--accent); font-size: 1.05rem; }
+  .links { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+  .links a { display: inline-block; border: 1px solid var(--line); background: var(--panel); border-radius: 8px;
+             padding: .45rem .8rem; text-decoration: none; font-size: .9rem; min-height: 42px; }
+  .links a:hover { border-color: var(--accent); }
+  .links a.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  footer { border-top: 1px solid var(--line); margin-top: 2rem; padding-top: 1rem; color: var(--muted); font-size: .82rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="brand">
+    <span class="logo" aria-hidden="true">F</span>
+    <div>
+      <h1>FormuSense</h1>
+      <p class="sub">AI-powered food product development agent &middot; problem statement PS-1 &middot; Tiny Dot Foods</p>
+    </div>
+  </div>
+  <p class="team">Technostatic Wings &mdash; Raja Sethupathy, Guna M, Angel Brightlin A.</p>
+</header>
+
+<div class="note">
+  <p><strong>This page is a static project page.</strong> FormuSense itself is a Python server, so it cannot
+  run here: GitHub Pages serves files, not processes. The application runs on your own machine, with nothing
+  installed beyond Python:</p>
+  <pre><code>python run.py --open     # opens the interface at http://127.0.0.1:8770</code></pre>
+  <p>No API key and no network call is needed for anything on this page. The slide deck is the deck generated
+  from the project record: <a href="slides.html">open it here</a>.</p>
+</div>
+
+<h2>What it does</h2>
+<p>It takes a food product from a written brief to a validated formulation, and needs fewer physical trials to
+get there, because it measures what came back instead of guessing again.</p>
+<div class="grid">
+  <div class="card"><span class="step">1 &middot; Understand</span><h3>The brief, parsed</h3><p>Spec text becomes numeric targets with tolerances, plus category, diet, allergens and claims. What the text cannot answer becomes an open question.</p></div>
+  <div class="card"><span class="step">2 &middot; Design</span><h3>A formulation</h3><p>Category slots are filled by intent and reconciled to 100 %, with acidulants dosed against the pH target.</p></div>
+  <div class="card"><span class="step">3 &middot; Predict</span><h3>With intervals</h3><p>Every characteristic carries a 95 % interval and the method that produced it, published before any batch exists.</p></div>
+  <div class="card"><span class="step">4 &middot; Trial</span><h3>On a simulated plant</h3><p>Known commissioning faults and analytical noise, so a prediction can genuinely be wrong.</p></div>
+  <div class="card"><span class="step">5 &middot; Diagnose</span><h3>Residuals, in sigma</h3><p>Signature rules rank the probable causes - a thermal offset, a drying shortfall, acid loss - each with its evidence.</p></div>
+  <div class="card"><span class="step">6 &middot; Plan</span><h3>The next version</h3><p>The measured process offset is corrected first, then the recipe is re-optimised, with a pass probability and a design of experiments.</p></div>
+</div>
+
+<h2>Evidence</h2>
+<p>The agent's closed loop against one-factor-at-a-time, on the same cases, the same trial budget and the same
+pass gate (every hard target on target, measured objective at or above 0.85):</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Case</th><th class="num">Agent trials</th><th class="num">One-factor-at-a-time</th><th class="num">Final objective</th></tr></thead>
+  <tbody>
+    <tr><td>High-protein masala namkeen pellet</td><td class="num">3</td><td class="num">not reached</td><td class="num">0.989 vs 0.932</td></tr>
+    <tr><td>High-protein high-fibre ragi cookie</td><td class="num">3</td><td class="num">not reached</td><td class="num">0.956 vs 0.878</td></tr>
+    <tr><td>Reduced-sugar mango fruit spread</td><td class="num">3</td><td class="num">not reached</td><td class="num">0.927 vs 0.800</td></tr>
+    <tr><td>High-protein whey beverage (ready-to-drink)</td><td class="num">2</td><td class="num">not reached</td><td class="num">0.985 vs 0.786</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="sub">Mean saving: <strong>4.25 trials per case</strong>, with 4 of 4 cases reaching the gate against 0 of 4
+for the comparison arm. Reproduce it with <code>python run.py --benchmark</code>; every number is read back from
+the record, never typed in.</p>
+
+<h2>Offline learning</h2>
+<p>A ridge regression for the measured objective and a calibrated logistic regression for pass and fail, both
+written in plain Python and trained on a versioned dataset the project builds itself. On the held-out test fold
+they beat their baselines on RMSE, ROC-AUC and Brier score. No API key is used anywhere, and the whole pipeline
+is reproducible offline with <code>python run.py --build-dataset</code> and <code>python run.py --train</code>.</p>
+
+<h2>Run it</h2>
+<pre><code>python run.py                 # the interface at http://127.0.0.1:8770
+python run.py --seed          # the demonstration cases
+python run.py --benchmark     # agent vs one-factor-at-a-time
+python run.py --report        # the internship report (DOCX, HTML, Markdown)
+python run.py --slides        # the presentation (PPTX), rebuilt from the record
+python -m unittest discover -s tests -t .   # the suite</code></pre>
+<ul class="stat">
+  <li><b>191</b> tests at this commit, one skipped (the live PostgreSQL round trip)</li>
+  <li><b>0</b> packages required &mdash; the standard library alone</li>
+  <li><b>15</b> population groups in the consumption-guidance reference set</li>
+  <li><b>2</b> database dialects: SQLite by default, PostgreSQL by configuration</li>
+</ul>
+
+<div class="links">
+  <a class="primary" href="https://github.com/Kirisos-Guna/FormuSense">Repository</a>
+  <a href="slides.html">Slide deck</a>
+  <a href="https://github.com/Kirisos-Guna/FormuSense/blob/main/docs/USER_GUIDE.md">User guide</a>
+  <a href="https://github.com/Kirisos-Guna/FormuSense#readme">README</a>
+  <a href="https://github.com/Kirisos-Guna/FormuSense/actions">CI runs</a>
+</div>
+
+<footer>
+  <p>Consumption guidance by population is product-development guidance against ICMR-NIN reference values, not
+  medical advice. Predictions carry published intervals; the physical trial remains the test.</p>
+</footer>
+</div>
+</body>
+</html>
