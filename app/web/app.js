@@ -198,14 +198,21 @@
     document.getElementById("status-products").textContent = health.products + " products, " + health.trials + " trials";
     document.getElementById("status-kb").textContent = health.ingredients + " ingredients, " + health.categories + " categories";
     var vision = health.vision || {};
+    var budget = vision.budget || {};
     var el = document.getElementById("status-vision");
-    var online = vision.openai || vision.gemini;
-    // Report what this machine can actually do: the drawing extras are an
-    // optional install, so "Pillow only" is wrong when Pillow is absent.
-    var label = online ? ("vision: " + (vision.provider || "API"))
-      : (vision.pillow ? "vision: Pillow only" : "vision: image analysis off");
+    // Report what is really configured. This used to read a "provider" key that
+    // nothing ever set, so a deployment with a working key still said "vision: API".
+    // The badge answers one question - is a model available for this run - so it says
+    // on or off and leaves the vendor, and the size of the model chain, to the record.
+    var online = !!vision.configured;
+    var label = online ? "AI: on"
+      : (vision.pillow ? "AI: off (Pillow analysis only)" : "AI: off");
     el.textContent = label;
     el.className = "pill" + (online ? " ok" : (vision.pillow ? "" : " warn"));
+    el.title = online
+      ? ("Model: " + (vision.model || "an API model") +
+         (budget.cap ? ". " + budget.remaining + " of " + budget.cap + " calls left this hour." : ". No hourly cap is set."))
+      : "No model key is set (see the README). Everything works without one.";
   }
 
   function view() { return document.getElementById("view"); }
@@ -226,6 +233,29 @@
       if (list[i].id === categoryId) return list[i];
     }
     return {};
+  }
+
+  /* The model layer is opt-in for each run: it costs a call and takes seconds, so it is
+     a decision the person pressing the button makes, never a side effect of attaching a
+     photograph. With no key configured the switch is disabled and says why, because a
+     control that silently does nothing is worse than no control at all. */
+  function aiInfo() { return (state.catalog || {}).ai || {}; }
+
+  /* One line naming the model, and nothing more: the switch is the decision, and the
+     guarantee a reader needs beside it is that no number in the record comes from the
+     model - not which vendor serves it or how many models stand behind it. */
+  function modelField() {
+    var info = aiInfo();
+    var on = !!info.configured;
+    var detail = on
+      ? ("Model: " + esc(info.model || "") + ". It only adds a description and a review; no number in the record comes from it.")
+      : "No model is configured, so this run is fully offline: the images are measured locally and the specification is parsed by rule.";
+    return "<div class='field'><span>Reference images (optional)</span>" +
+      "<div class='file-drop' id='drop'>Drop product photos here, or click to choose. Offline image analysis always runs; a configured model adds a semantic description on top.</div>" +
+      "<input type='file' id='files' accept='image/*' multiple hidden><div class='thumbs' id='thumbs'></div>" +
+      "<div class='checks'><label><input type='checkbox' id='f-use-ai'" + (on ? "" : " disabled") +
+      ">Use the model for this run</label></div>" +
+      "<p class='small muted'>" + detail + "</p></div>";
   }
 
   function packUnit(categoryId) {
@@ -279,7 +309,7 @@
       Object.keys(catalog.allergens || {}).map(function (id) {
         return "<label><input type='checkbox' value='" + esc(id) + "'>" + esc(catalog.allergens[id]) + "</label>";
       }).join("") + "</div></div>");
-    html.push("<div class='field'><span>Reference images (optional)</span><div class='file-drop' id='drop'>Drop product photos here, or click to choose. Offline Pillow analysis always runs; add an OpenAI or Gemini key for the semantic layer.</div><input type='file' id='files' accept='image/*' multiple hidden><div class='thumbs' id='thumbs'></div></div>");
+    html.push(modelField());
     html.push("<div class='row end'><span class='small muted' id='design-hint'>A specification text is required.</span>" +
       "<button class='ghost' id='btn-clear'>Clear</button><button class='primary' id='btn-design'>Design product</button></div>");
     html.push("</div>");
@@ -452,6 +482,8 @@
       // The number in that field is in the unit the form labelled it with, so the
       // payload says which one it is.
       unit: packUnit(categoryField.value),
+      // Off unless the box is ticked, so an unattended run never spends a call.
+      use_ai: !!((document.getElementById("f-use-ai") || {}).checked),
       images: state.images.slice(),
       plant: {
         name: document.getElementById("p-name").value,
@@ -678,7 +710,7 @@
   }
 
   /* --------------------------------------------------------------- product */
-  var TABS = ["overview", "prediction", "populations", "trials", "plan", "process", "report", "ledger"];
+  var TABS = ["overview", "prediction", "populations", "trials", "plan", "process", "report", "ledger", "ask"];
 
   /* What the record says the next useful action is. This is advice drawn from
    * the stored state, not a judgement: it mirrors the header buttons and never
@@ -778,7 +810,39 @@
     if (tab === "process") return tabProcess(product);
     if (tab === "report") return tabReport(product);
     if (tab === "ledger") return tabLedger(product);
+    if (tab === "ask") return tabAsk(product);
     return "";
+  }
+
+  /* Ask the record. The answer comes from a bounded extract of this product's stored
+     brief, formulation, prediction, trials and plan - the same rows the other tabs
+     render - so it can quote the record but not add to it. The citations are shown
+     because an answer that names its sources is checkable, and one that does not is a
+     story. */
+  function tabAsk(product) {
+    var info = aiInfo();
+    var html = ["<div class='card'><h3>Ask the record</h3>"];
+    html.push("<p class='card-sub'>Answers are drawn from this product's own brief, formulation, prediction, trials and plan, and from nothing else. Ask which targets the last trial missed, what changed between versions, or why a plan proposes what it does.</p>");
+    if (!info.configured) {
+      html.push("<p class='small muted'>No model is configured, so the record cannot be asked. Set a model key in .env and reload. Every other tab is unaffected: all of them are computed locally.</p>");
+    }
+    html.push("<label class='field'><span>Your question</span><textarea id='ask-q' placeholder='e.g. Which targets did the last trial miss, and by how much?'>" + esc(state.askDraft || "") + "</textarea></label>");
+    html.push("<div class='row end'><span class='small muted'>Answers quote the record. They cannot change it.</span>" +
+      "<button class='primary' data-action='ask'" + (info.configured ? "" : " disabled") + ">Ask</button></div>");
+    var answer = state.askAnswer;
+    if (answer) {
+      html.push("<div class='callout'><strong>Answer</strong>");
+      html.push("<p class='small'>" + esc(answer.answer || answer.note || "No answer.") + "</p>");
+      if ((answer.citations || []).length) {
+        html.push("<p class='small muted'>From: " + answer.citations.map(function (citation) {
+          return "<span class='tag'>" + esc(citation) + "</span>";
+        }).join(" ") + "</p>");
+      }
+      html.push("<p class='small muted'>" + esc(answer.model ? (answer.model + (answer.cached ? ", served from the cache" : "")) : "no model was called") +
+        ". The question and answer are in the ledger.</p></div>");
+    }
+    html.push("</div>");
+    return html.join("");
   }
 
   function tabOverview(product, record) {
@@ -786,6 +850,13 @@
     var html = ["<div class='grid two'>"];
     html.push("<div class='card'><h3>The brief as understood</h3>");
     html.push("<p class='small'>" + esc(brief.description) + "</p>");
+    var vision = product.vision || {};
+    if (vision.available && (vision.lines || []).length) {
+      html.push("<div class='callout'><strong>Reference image, as the model described it</strong>" +
+        "<ul class='bullets small'>" + vision.lines.map(function (line) { return "<li>" + esc(line) + "</li>"; }).join("") + "</ul>" +
+        "<p class='small muted'>" + esc(vision.model || "") +
+        ", recorded " + esc(vision.created_at || "") + ". A semantic description only: it adds no numbers to the brief.</p></div>");
+    }
     html.push("<div class='scroll'><table class='compact'><thead><tr><th>KPI</th><th class='num'>Target</th><th>Direction</th><th>Class</th><th>Predicted</th><th>Status</th></tr></thead><tbody>");
     var byId = {};
     ((record || {}).predictions || []).forEach(function (row) { byId[row.id] = row; });
@@ -1205,6 +1276,30 @@
         location.hash = "#/product/" + productId + "/" + button.getAttribute("data-tab");
       });
     });
+    var ask = document.querySelector("[data-action='ask']");
+    if (ask) {
+      var question = document.getElementById("ask-q");
+      if (question) {
+        question.addEventListener("input", function () { state.askDraft = question.value; });
+      }
+      ask.addEventListener("click", function () {
+        var asked = (question ? question.value : "").trim();
+        if (!asked) return;
+        withBusy("Asking the record", "Assembling this product's stored brief, formulation, prediction, trials and plan, then answering from that extract alone.", function () {
+          // The question is a POST because it leaves a trace: the question and its
+          // answer go into the ledger, which is what makes the chat auditable rather
+          // than a conversation nobody can check afterwards.
+          return api("POST", "/api/products/" + productId + "/ask", { question: asked, use_ai: true }).then(function (result) {
+            state.askAnswer = result;
+            state.askDraft = asked;
+            return reload(productId, "ask").then(function () {
+              renderProduct(productId, "ask");
+              if (!result.answer) toast(result.note || "The record could not be asked.");
+            });
+          });
+        });
+      });
+    }
     Array.prototype.forEach.call(document.querySelectorAll("[data-action='loop']"), function (loopButton) {
       loopButton.addEventListener("click", function () {
         var budget = prompt("How many physical trials may the closed loop use?", "6");

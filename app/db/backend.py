@@ -53,6 +53,7 @@ SEQUENCED_TABLES = frozenset(
         "plans",
         "ledger",
         "benchmarks",
+        "ai_calls",
     }
 )
 

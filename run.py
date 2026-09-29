@@ -149,6 +149,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
 
+    # Before any setting is read: a local key lives in .env, which is git-ignored, and
+    # the environment still wins over it.
+    from app.config import load_env_file
+
+    load_env_file()
+
     if args.db_check:
         from app.db.check import check
 

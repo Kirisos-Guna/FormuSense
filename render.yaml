@@ -29,3 +29,40 @@ services:
         value: "1"
       - key: FORMUSENSE_LOG_LEVEL
         value: INFO
+      # --- The optional model layer -------------------------------------------
+      # `sync: false` means Render asks for the value in its dashboard and the
+      # secret is never written into this file. This repository holds no key: the
+      # image analysis, the formulation models, the predictions and every number in
+      # the record run without one, and that is the mode the tests and the CI
+      # pipeline cover. Adding a key here only turns on the semantic description of
+      # uploaded photographs, the specification review and the record questions.
+      - key: OPENROUTER_API_KEY
+        sync: false
+      # Free models only, so a shared public demo cannot spend anything. The free
+      # pools are separate, so a second and third free model is what answers when the
+      # first one is busy. Add a paid model after a comma if you would rather a busy
+      # pool fell back than failed.
+      - key: OPENROUTER_MODEL
+        value: qwen/qwen3.8-27b:free,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,dots-studio/dots-3-note-preview:free
+      # These prompts extract rather than reason, and the thinking is billed as output
+      # tokens: on this model, leaving it on was three times slower on 20 times the
+      # output tokens.
+      - key: FORMUSENSE_AI_REASONING
+        value: "off"
+      # A public demo shares one key, so the guardrails are set here rather than left
+      # to the defaults: a ceiling per hour, at most three images per call, and a
+      # short timeout so a slow provider cannot hold a request open.
+      - key: FORMUSENSE_AI_MAX_CALLS_PER_HOUR
+        value: "60"
+      - key: FORMUSENSE_AI_MAX_IMAGES
+        value: "3"
+      - key: FORMUSENSE_AI_TIMEOUT
+        value: "30"
+      # A refused request costs nothing, so the free pool gets a few tries before it
+      # is treated as unavailable.
+      - key: FORMUSENSE_AI_RETRIES
+        value: "2"
+      - key: OPENROUTER_HTTP_REFERER
+        value: https://formusense.onrender.com
+      - key: OPENROUTER_APP_TITLE
+        value: FormuSense

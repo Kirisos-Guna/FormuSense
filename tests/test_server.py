@@ -7,10 +7,13 @@ product, 400 for a missing specification) instead of a stack trace.
 """
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from app import server
 from app.bootstrap import CASES
@@ -72,6 +75,13 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(catalog["claims"])
         self.assertTrue(catalog["allergens"])
         self.assertIn("vision", catalog)
+        # The form discloses which model a run would use, so the catalog has to carry
+        # the configured chain and not only the name of a provider.
+        self.assertIn("ai", catalog)
+        for key in ("configured", "provider", "model", "models"):
+            self.assertIn(key, catalog["ai"])
+        for chain in (catalog["ai"]["models"] or {}).values():
+            self.assertTrue(chain, "a configured provider names no model")
 
     def test_the_case_studies_are_offered_with_their_plant_story(self) -> None:
         cases = server.cases()
@@ -164,6 +174,97 @@ class HandlerTests(unittest.TestCase):
         deleted = self.call("DELETE", f"/api/products/{created['product_id']}")
         self.assertEqual(deleted["deleted"], created["product_id"])
         self.assertEqual(self.call("GET", "/api/products")["products"], [])
+
+
+class AiSurfaceTests(unittest.TestCase):
+    """The API's side of the model layer: what it admits to, and what it never says.
+
+    A key in an environment variable is one careless ``return locals()`` away from
+    being published, so the shape of the health payload is asserted rather than
+    assumed.
+    """
+
+    KEY = "sk-or-test-abcdefghijklmnop"
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="formusense-ai-api-"))
+        self.service = AgentService(Store(self.tmp / "test.db"))
+
+    def tearDown(self) -> None:
+        self.service.store.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def with_key(self, **env):
+        variables = {"OPENROUTER_API_KEY": self.KEY, "OPENROUTER_MODEL": "openai/gpt-4o-mini"}
+        variables.update(env)
+        return mock.patch.dict(os.environ, variables, clear=False)
+
+    def test_the_health_payload_names_the_provider_and_never_the_key(self) -> None:
+        with self.with_key():
+            for strip in ("OPENAI_API_KEY", "GEMINI_API_KEY", "FORMUSENSE_AI"):
+                with mock.patch.dict(os.environ, {strip: ""}, clear=False):
+                    health = server.r_health(self.service, {}, {})
+        self.assertTrue(health["ai"]["configured"])
+        self.assertEqual(health["ai"]["provider"], "openrouter")
+        self.assertEqual(health["ai"]["providers"], ["openrouter"])
+        self.assertEqual(health["ai"]["model"], "openai/gpt-4o-mini")
+        self.assertNotIn(self.KEY, json.dumps(health))
+        self.assertNotIn("sk-or-test", json.dumps(health))
+
+    def test_the_badge_is_told_which_provider_is_live(self) -> None:
+        # The interface printed "AI: API" whatever was configured, because it read a
+        # key that nothing set. A wrong badge is worse than none.
+        with self.with_key():
+            with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "", "GEMINI_API_KEY": ""}, clear=False):
+                health = server.r_health(self.service, {}, {})
+        vision = health["vision"]
+        self.assertEqual(vision["provider"], "openrouter")
+        self.assertEqual(vision["model"], "openai/gpt-4o-mini")
+        self.assertTrue(vision["openrouter"])
+        self.assertFalse(vision["openai"])
+        self.assertFalse(vision["gemini"])
+        self.assertIn("openrouter", vision["active_mode"])
+        self.assertIn("budget", vision)
+        self.assertLessEqual(vision["budget"]["used"], vision["budget"]["cap"])
+
+    def test_without_a_key_the_badge_says_offline_and_the_layer_is_off(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"OPENROUTER_API_KEY": "", "OPENAI_API_KEY": "", "GEMINI_API_KEY": ""},
+            clear=False,
+        ):
+            health = server.r_health(self.service, {}, {})
+        self.assertFalse(health["ai"]["configured"])
+        self.assertIsNone(health["ai"]["provider"])
+        self.assertIsNone(health["vision"]["provider"])
+        self.assertEqual(health["vision"]["active_mode"], "offline-image-analysis")
+        self.assertTrue(health["vision"]["offline_analysis"])
+
+    def test_the_kill_switch_turns_the_layer_off_even_with_a_key(self) -> None:
+        # A machine that holds a key for other tools must be able to say "not here".
+        with self.with_key(FORMUSENSE_AI="0"):
+            health = server.r_health(self.service, {}, {})
+        self.assertFalse(health["ai"]["configured"])
+        self.assertEqual(health["ai"]["providers"], [])
+
+    def test_a_question_is_a_route_that_exists(self) -> None:
+        matched = server.ROUTER.match("POST", "/api/products/7/ask")
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched[1], {"product_id": "7"})
+
+    def test_asking_without_the_model_answers_with_a_reason_rather_than_failing(self) -> None:
+        created = server.r_case_create(self.service, {}, {"key": "cookie"})
+        matched = server.ROUTER.match("POST", "/api/products/%d/ask" % created["product_id"])
+        handler, params = matched
+        result = handler(self.service, {"question": "What is the cost ceiling?"}, params)
+        self.assertEqual(result["answer"], "")
+        self.assertIn("not requested", result["note"])
+        self.assertEqual(result["question"], "What is the cost ceiling?")
+
+    def test_a_question_about_an_unknown_product_is_a_not_found(self) -> None:
+        handler, params = server.ROUTER.match("POST", "/api/products/424242/ask")
+        with self.assertRaises(KeyError):
+            handler(self.service, {"question": "Anything?"}, params)
 
 
 if __name__ == "__main__":

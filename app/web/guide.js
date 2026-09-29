@@ -52,7 +52,8 @@
     { tab: "Plan", what: "The proposed next version and its evidence.", press: "Press **Plan next version**, then review and accept or ignore it.", see: "A pass probability, a recipe delta, a process delta with the measured offset named, the expected performance of the proposed version, and a small design of experiments for the trial." },
     { tab: "Process", what: "How the product would actually be made.", press: "Nothing.", see: "Unit operations with equipment and durations, operating parameters against their validated ranges, in-process targets, critical control points, packaging and expected yield." },
     { tab: "Report", what: "The development report for this product.", press: "Nothing - it is generated from the record.", see: "The brief, design, predictions, trials, diagnosis, changes and efficiency, written from the stored rows rather than retyped." },
-    { tab: "Ledger", what: "The audit trail.", press: "Nothing.", see: "Every recorded event with its timestamp. This is what makes an efficiency claim checkable after the fact." }
+    { tab: "Ledger", what: "The audit trail.", press: "Nothing.", see: "Every recorded event with its timestamp. This is what makes an efficiency claim checkable after the fact." },
+    { tab: "Ask", what: "Questions answered from this product's own record.", press: "Type a question and press Ask, once a model key is configured.", see: "An answer drawn from the stored brief, formulation, prediction, trials and plan, with the parts of the record it used, and the model that produced it. It cannot change the record: the question and answer only add a ledger line." }
   ];
 
   var GLOSSARY = [
@@ -69,7 +70,9 @@
     { term: "OFAT", text: "One-factor-at-a-time, the comparison arm: change the single most promising factor for the worst target, keep the batch if it improves, revert it if it does not." },
     { term: "%RDA", text: "The share of a population group's daily protein requirement that one serving delivers, against the ICMR-NIN 2020 reference values. Development guidance, not medical advice." },
     { term: "CCP", text: "Critical control point: a step on the line with a critical limit, a way to monitor it, and an action if it is exceeded." },
-    { term: "Ledger", text: "The append-only audit trail of everything recorded for a product." }
+    { term: "Ledger", text: "The append-only audit trail of everything recorded for a product." },
+    { term: "Model layer (optional)", text: "A configured API key lets a model describe the reference photographs, review the specification against what the rule-based parser already found, and answer questions about the record. It runs only when the switch on the New product form is ticked, it never sets a target, a pack size or a cost, and an hourly ceiling plus a reply cache bound what it can spend. With no key the application is exactly what it is offline: deterministic, reproducible and complete." },
+    { term: "Prompt cache", text: "Every model reply is stored against a hash of the request, image bytes included. Asking the same question about the same photograph is answered from the record instead of the provider, so a repeat costs nothing and returns the same words." }
   ];
 
   /* ------------------------------------------------------------ live facts */
@@ -196,7 +199,7 @@
     var html = ["<p class='small'>Where to look when something is not working, and what this app honestly does not do.</p>"];
     html.push("<dl class='kv'>" +
       "<dt>Nothing loads</dt><dd>Check the server is running and look at the terminal it was started from. If the port is taken, start it elsewhere: <code>python run.py --port 9000</code>.</dd>" +
-      "<dt>Header pill says \"vision: image analysis off\"</dt><dd>Image analysis needs the optional Pillow install. Everything else works without it; the rest of the pipeline never needs an API key or the network.</dd>" +
+      "<dt>Header pill says \"AI: off\"</dt><dd>No model key is configured, which is the default and changes nothing except the optional descriptions. The offline image analysis needs the optional Pillow install. The rest of the pipeline never needs an API key or the network.</dd>" +
       "<dt>The Model tab is empty</dt><dd>No model has been trained in this database yet. Build the dataset and train it offline: <code>python run.py --build-dataset</code> then <code>python run.py --train</code>.</dd>" +
       "<dt>A brief cannot be satisfied</dt><dd>That is a result, not a bug. The agent reports the target, the best achievable value and the reason instead of quietly missing it.</dd>" +
       "<dt>\"Wrong database\" or a Postgres error</dt><dd>The default is one SQLite file, nothing to install. PostgreSQL is opt-in through <code>FORMUSENSE_DB_URL</code>; migrations for both dialects live in <code>db/migrations/</code>.</dd>" +

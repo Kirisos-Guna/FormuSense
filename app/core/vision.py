@@ -15,12 +15,23 @@ It works in two modes, in this order of preference:
    family, evidence of inclusions - and onto hints such as "expect a darker
    crumb, target browning is high". This runs with no network, no key and no
    cost, and it is the mode the demo, the tests and the report all use.
-2. **Multimodal model (optional).** If ``OPENAI_API_KEY`` or ``GEMINI_API_KEY`` is
-   present and a reference image is supplied, the same question is put to a
-   vision model, which returns the richer, semantic description (piece shape,
-   surface detailing, apparent quality defects). The result is treated as a
-   *hint layer on top of the same structured schema*, never as the source of
-   numbers: a vision model must not be allowed to invent a target.
+2. **Multimodal model (optional).** When a key is configured and a reference image
+   is supplied, the same question is put to a vision model, which returns the
+   richer, semantic description (piece shape, surface detailing, apparent quality
+   defects). OpenRouter is the provider this is designed around, because one key
+   there reaches every vendor's models; ``OPENAI_API_KEY`` and ``GEMINI_API_KEY``
+   are still honoured, through the same single call in :mod:`app.ai.client`.
+
+   The result is treated as a *hint layer on top of the same structured schema*,
+   never as the source of numbers, and that is enforced rather than promised:
+   :func:`_accept_semantic` keeps only the eight description keys and drops
+   anything else, so a reply that volunteers a protein content - or a weight, or a
+   cost - cannot reach the brief even if the model insists.
+
+   The call is also bounded: at most ``max_images`` photographs, a bounded reply
+   length, a timeout, and an hourly ceiling shared by every product in the process
+   (:func:`app.ai.client.usage_this_hour`). Over the ceiling the offline answer is
+   returned with the reason attached, so the feature degrades rather than fails.
 
 Whatever the mode, the output shape is identical, so the rest of the system -
 and the report - never needs to branch on how the understanding was obtained.
@@ -28,11 +39,15 @@ and the report - never needs to branch on how the understanding was obtained.
 from __future__ import annotations
 
 import base64
-import json
 import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from ..ai import AiError, AiUnavailable
+from ..ai import client as ai_client
+from ..ai import prompts as ai_prompts
+from ..config import AiSettings, ai_settings
 
 # Colour buckets used to name the dominant hue in plain language.
 COLOUR_BUCKETS: Tuple[Tuple[str, Tuple[float, float, float]], ...] = (
@@ -57,35 +72,56 @@ FORM_BY_ASPECT = (
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "uploads"
 
 
-def vision_available() -> Dict[str, Any]:
-    """Report which understanding modes are available in this environment."""
-    offline = True
-    pillow = False
+def pillow_available() -> bool:
+    """Whether the offline measurement path can actually decode an image here."""
     try:  # pragma: no cover - import guard only
         import PIL  # noqa: F401
 
-        pillow = True
+        return True
     except Exception:
-        pillow = False
-    openai_key = bool(os.environ.get("OPENAI_API_KEY"))
-    gemini_key = bool(os.environ.get("GEMINI_API_KEY"))
+        return False
+
+
+def vision_available(
+    settings: Optional[AiSettings] = None, cache: Any = None
+) -> Dict[str, Any]:
+    """Report which understanding modes this environment can actually offer.
+
+    ``configured`` is the field the status pill reads, and it is the one that has to
+    be right: the badge is the single line a reviewer reads to decide whether the model
+    layer is really on, so a deployment with a working key has to be able to say so.
+    ``provider`` and ``model`` are reported for the record and the API - the interface
+    names the model and not the platform behind it.
+    """
+    config = settings or ai_settings()
+    budget = ai_client.usage_this_hour(cache, config)
+    keys = {name for name, *_ in config.providers()}
     mode = "offline-image-analysis"
-    if pillow and openai_key:
-        mode = "offline-image-analysis + openai-vision"
-    elif pillow and gemini_key:
-        mode = "offline-image-analysis + gemini-vision"
+    if config.provider:
+        mode = "offline-image-analysis + " + config.provider + "-vision"
     return {
-        "offline_analysis": offline,
-        "pillow": pillow,
-        "openai": openai_key,
-        "gemini": gemini_key,
+        "offline_analysis": True,
+        "pillow": pillow_available(),
+        "configured": config.configured,
+        "provider": config.provider or None,
+        # The model it would be asked first: the chain is in ai_settings for a
+        # reader who wants to know what happens when that one is busy.
+        "model": config.primary_model(config.provider) if config.provider else None,
+        "base_url": config.base_urls.get(config.provider) if config.provider else None,
+        # The two original key names stay in the payload: the interface reads them,
+        # and they were part of this response before OpenRouter existed.
+        "openrouter": "openrouter" in keys,
+        "openai": "openai" in keys,
+        "gemini": "gemini" in keys,
         "active_mode": mode,
+        "budget": budget.as_dict(),
         "note": (
             "Offline measurement of colour, lightness and texture proxies always runs. "
-            "A multimodal model is used only when an API key is configured; it adds "
-            "semantic description and never invents numeric targets."
+            "A multimodal model is used only when an API key is configured and the run "
+            "asks for it; it adds a semantic description and never invents numeric targets."
         ),
     }
+
 
 
 # --------------------------------------------------------------------------- #
@@ -309,112 +345,241 @@ def offline_describe(paths: List[str], category_hint: str = "") -> Dict[str, Any
 # --------------------------------------------------------------------------- #
 # Optional multimodal path
 # --------------------------------------------------------------------------- #
-VISION_PROMPT = (
-    "You are a food product development scientist. You are looking at a reference "
-    "image of a food product that must be reverse-engineered. Respond ONLY with a "
-    "JSON object using these keys: product_form (short string), surface_finish "
-    "(short string), dominant_colour (short string), visible_inclusions (list of "
-    "strings), shape_and_size_notes (string), apparent_defects (list of strings), "
-    "process_hypothesis (string, e.g. 'baked rotary-moulded biscuit'), "
-    "confidence (0-1). Do not invent numeric composition values."
+#: The prompt lives with the other prompts, so everything the agent says to a model
+#: can be read in one place. The name is repeated here because this module is where a
+#: reader looks for it.
+VISION_PROMPT = ai_prompts.VISION_PROMPT
+
+#: Any key whose *name* looks like a composition value is dropped from a reply,
+#: however plausibly it is written. The models in ``app.core`` own those numbers. A
+#: language model that supplied one would be supplying something indistinguishable
+#: from a measurement, and the record could no longer say which it was.
+_NUMERIC_KEY = re.compile(
+    r"(?i)(protein|fat|sugar|carb|fibre|fiber|sodium|salt|moisture|calorie|energy|"
+    r"kcal|kj|cost|price|density|weight|volume|mass|percent|pct|water_activity)"
 )
 
+_MAX_TEXT = 240
+_MAX_ITEMS = 6
+_MAX_ITEM = 120
 
-def _openai_vision(paths: List[str]) -> Optional[Dict[str, Any]]:
-    import urllib.request
 
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        return None
-    content: List[Dict[str, Any]] = [{"type": "text", "text": VISION_PROMPT}]
-    for path in paths[:3]:
-        if path.startswith("http"):
-            content.append({"type": "image_url", "image_url": {"url": path}})
+def _clean_text(value: Any, limit: int = _MAX_TEXT) -> str:
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _clean_list(value: Any) -> List[str]:
+    """A list of short strings, from whatever the model actually returned."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value[: _MAX_ITEMS * 2]:
+        if isinstance(item, dict):
+            item = item.get("text") or item.get("value") or item.get("name") or ""
+        text = _clean_text(item, _MAX_ITEM)
+        if text:
+            out.append(text)
+        if len(out) >= _MAX_ITEMS:
+            break
+    return out
+
+
+def _accept_semantic(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """The subset of a model's reply this system is willing to store.
+
+    Eight keys, by name; anything else is discarded. A key that names a composition
+    value is discarded specifically, because "describe this product" is an invitation
+    a helpful model will sometimes answer with a protein content, and a number from a
+    language model must never become a number on the brief. Scalars are flattened to
+    a single line and truncated, and lists are capped, so a reply cannot grow the
+    record without bound.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key in ai_prompts.VISION_KEYS:
+        if key not in raw or _NUMERIC_KEY.search(key):
             continue
-        try:
-            with open(path, "rb") as handle:
-                encoded = base64.b64encode(handle.read()).decode("ascii")
-        except OSError:
-            continue
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded}"}})
-    if len(content) == 1:
-        return None
-    body = json.dumps(
-        {
-            "model": os.environ.get("OPENAI_VISION_MODEL", "gpt-4o-mini"),
-            "messages": [{"role": "user", "content": content}],
-            "max_tokens": 700,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=body,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        value = raw[key]
+        if key in ("visible_inclusions", "apparent_defects"):
+            out[key] = _clean_list(value)
+        elif key == "confidence":
+            try:
+                out[key] = max(0.0, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                continue
+        else:
+            text = _clean_text(value)
+            if text:
+                out[key] = text
+    return out
+
+
+def model_describe(
+    paths: List[str],
+    *,
+    settings: Optional[AiSettings] = None,
+    cache: Any = None,
+    product_id: Optional[int] = None,
+    transport: Optional[ai_client.Transport] = None,
+) -> Dict[str, Any]:
+    """Ask a vision model about the reference images, through the one client.
+
+    Returned in the same ``{"source", "raw", "parsed"}`` shape the two per-vendor
+    functions used to return, with the provenance added on top - so this module's
+    callers did not have to learn a new shape when two vendor functions collapsed
+    into one provider table.
+    """
+    config = settings or ai_settings()
+    result = ai_client.chat(
+        [{"role": "user", "content": ai_prompts.VISION_PROMPT}],
+        images=paths,
+        settings=config,
+        cache=cache,
+        product_id=product_id,
+        transport=transport,
+        kind="vision",
+        # A description that cannot be parsed is a description nobody can read, and the
+        # free models this defaults to answer in prose now and then.
+        expect_json=True,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:  # pragma: no cover - network
-            payload = json.loads(response.read().decode("utf-8"))
-        text = payload["choices"][0]["message"]["content"]
-        return {"source": "openai-vision", "raw": text, "parsed": _extract_json(text)}
-    except Exception as exc:  # pragma: no cover - network
-        return {"source": "openai-vision", "error": str(exc)}
+    return {
+        "source": result.provider + "-vision",
+        "raw": result.text,
+        "parsed": _accept_semantic(ai_client.parse_json_object(result.text)),
+        "provider": result.provider,
+        "model": result.model,
+        "cached": result.cached,
+        "ms": result.ms,
+        "call_id": result.call_id,
+    }
 
 
-def _gemini_vision(paths: List[str]) -> Optional[Dict[str, Any]]:  # pragma: no cover - network
-    import urllib.request
+def describe_images(
+    paths: List[str],
+    category_hint: str = "",
+    *,
+    use_model: bool = True,
+    settings: Optional[AiSettings] = None,
+    cache: Any = None,
+    product_id: Optional[int] = None,
+    transport: Optional[ai_client.Transport] = None,
+) -> Dict[str, Any]:
+    """Understand the reference images: measurement always, model when asked for.
 
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        return None
-    parts: List[Dict[str, Any]] = [{"text": VISION_PROMPT}]
-    for path in paths[:3]:
-        if path.startswith("http"):
-            continue
-        try:
-            with open(path, "rb") as handle:
-                encoded = base64.b64encode(handle.read()).decode("ascii")
-        except OSError:
-            continue
-        parts.append({"inline_data": {"mime_type": "image/png", "data": encoded}})
-    if len(parts) == 1:
-        return None
-    model = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.0-flash")
-    body = json.dumps({"contents": [{"parts": parts}]}).encode("utf-8")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-        return {"source": "gemini-vision", "raw": text, "parsed": _extract_json(text)}
-    except Exception as exc:
-        return {"source": "gemini-vision", "error": str(exc)}
-
-
-def _extract_json(text: str) -> Dict[str, Any]:
-    match = re.search(r"\{.*\}", text or "", re.DOTALL)
-    if not match:
-        return {}
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return {}
-
-
-def describe_images(paths: List[str], category_hint: str = "") -> Dict[str, Any]:
-    """Understand the reference images: measurement always, model when configured."""
+    The model is asked only when four things hold at once: the caller asked for it, a
+    key is configured, there is an image something can read, and this hour's budget
+    has not been spent. Every other outcome is a *reason* rather than an error, and
+    it is reported in ``model_note`` - so the interface can say why a description is
+    thin instead of leaving the user to wonder whether the feature is broken.
+    """
+    config = settings or ai_settings()
     result = offline_describe(paths, category_hint)
-    remote = any(p.startswith("http") for p in paths)
-    semantic: Optional[Dict[str, Any]] = None
-    if paths and (remote or result["analysed_count"]):
-        semantic = _openai_vision(paths) or _gemini_vision(paths)
-    if semantic and "error" not in semantic:
-        result["semantic"] = semantic
-        result["source"] = f"{result['source']} + {semantic.get('source')}"
-    elif semantic:
-        result["semantic_error"] = semantic.get("error")
-    result["available"] = vision_available()
+    result["source"] = "offline-image-analysis"
+    result["model_note"] = ""
+    result["model"] = None
+    result["semantic"] = None
+
+    if not use_model:
+        result["model_note"] = "the model was not requested for this run"
+    elif not config.configured:
+        result["model_note"] = "no AI provider key is configured, so this is the offline description"
+    elif not paths:
+        result["model_note"] = "no reference images were supplied"
+    else:
+        # The condition is about the *file*, not about Pillow. A machine without
+        # Pillow gets an empty offline measurement, but the vision model decodes the
+        # image itself and can still describe it - so gating the model on a Pillow
+        # result would silently switch the whole model layer off on exactly the
+        # installations that have nothing else to fall back on.
+        readable = any(str(p).startswith("http") or os.path.exists(str(p)) for p in paths)
+        if not readable:
+            result["model_note"] = "no reference image could be read"
+        else:
+            budget = ai_client.usage_this_hour(cache, config)
+            if budget.exceeded:
+                result["model_note"] = (
+                    "the hourly model budget is spent ("
+                    + str(budget.used)
+                    + "/"
+                    + str(budget.cap)
+                    + "), so this is the offline description"
+                )
+            else:
+                try:
+                    semantic = model_describe(
+                        paths,
+                        settings=config,
+                        cache=cache,
+                        product_id=product_id,
+                        transport=transport,
+                    )
+                except AiUnavailable as exc:
+                    result["model_note"] = "no AI provider key is configured (" + str(exc) + ")"
+                except AiError as exc:
+                    # A provider that fails is a sentence on the record, not a failure
+                    # of the product. The offline description is still a description.
+                    result["semantic_error"] = str(exc)
+                    result["model_note"] = "the model could not be reached: " + str(exc)
+                else:
+                    result["semantic"] = semantic
+                    result["model"] = {
+                        "provider": semantic["provider"],
+                        "model": semantic["model"],
+                        "cached": semantic["cached"],
+                        "ms": semantic["ms"],
+                        "call_id": semantic["call_id"],
+                    }
+                    result["source"] = result["source"] + " + " + semantic["source"]
+    result["available"] = vision_available(config, cache)
     return result
+
+
+def description_lines(understanding: Optional[Dict[str, Any]]) -> List[str]:
+    """The semantic description as short lines, for the interface and the report.
+
+    Kept here rather than in the interface so the browser and the written report say
+    the same thing about the same image, in the same words, with the same
+    attribution. A description that reads differently in two places is worse than one
+    place having no description at all.
+    """
+    data = understanding or {}
+    semantic = (data.get("semantic") or {}).get("parsed") or {}
+    provider = (data.get("model") or {}).get("model")
+    prefix = ("Model description (" + str(provider) + "): ") if provider else "Model description: "
+    lines: List[str] = []
+    if semantic.get("product_form"):
+        lines.append(prefix + semantic["product_form"])
+    for key, label in (
+        ("surface_finish", "surface"),
+        ("dominant_colour", "colour"),
+        ("shape_and_size_notes", "shape and size"),
+    ):
+        if semantic.get(key):
+            lines.append(label.capitalize() + ": " + semantic[key])
+    for note in semantic.get("visible_inclusions") or []:
+        lines.append("Visible inclusion: " + note)
+    for note in semantic.get("apparent_defects") or []:
+        lines.append("Apparent defect: " + note)
+    return lines
+
+
+def description_lines_from_record(text: str, model: str = "") -> List[str]:
+    """The description lines for a reply that is already stored.
+
+    The interface and the report both re-render a description from the record rather
+    than from the response that produced it, so the two cannot drift and a description
+    survives a reload. The stored text goes through the same acceptance filter as a
+    fresh reply: the table keeps whatever the provider sent, and only this function
+    decides what counts as a description.
+    """
+    semantic = _accept_semantic(ai_client.parse_json_object(text or ""))
+    understanding: Dict[str, Any] = {"semantic": {"parsed": semantic}}
+    if model:
+        understanding["model"] = {"model": model}
+    return description_lines(understanding)
 
 
 def apply_hints_to_payload(payload: Dict[str, Any], understanding: Dict[str, Any]) -> Dict[str, Any]:
@@ -424,9 +589,14 @@ def apply_hints_to_payload(payload: Dict[str, Any], understanding: Dict[str, Any
     semantic = (understanding.get("semantic") or {}).get("parsed") or {}
     if semantic:
         if semantic.get("process_hypothesis"):
-            hints.append(f"Vision model process hypothesis: {semantic['process_hypothesis']}")
+            hints.append("Vision model process hypothesis: " + str(semantic["process_hypothesis"]))
         for defect in semantic.get("apparent_defects") or []:
-            hints.append(f"Vision model flagged: {defect}")
+            hints.append("Vision model flagged: " + str(defect))
     augmented["vision_hints"] = hints
     augmented["vision_source"] = understanding.get("source")
+    # The provenance travels with the description. A report that says a model
+    # described the photograph, without saying which model and whether the answer came
+    # from the cache, is a claim nobody can check.
+    augmented["vision_model"] = (understanding.get("model") or {}).get("model")
+    augmented["vision_note"] = understanding.get("model_note") or ""
     return augmented

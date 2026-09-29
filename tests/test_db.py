@@ -239,6 +239,44 @@ class MigrationTests(unittest.TestCase):
         names = {row["name"] for row in rows}
         for table in ("products", "formulations", "trials", "predictions", "plans", "ledger", "schema_migrations"):
             self.assertIn(table, names)
+        # The model layer's own table arrives in its own migration, so a checkout that
+        # stopped at the first one would have an application that fails on its first
+        # call rather than a database that is simply older.
+        self.assertIn("ai_calls", names)
+
+    def test_the_two_dialects_create_the_same_tables(self) -> None:
+        # Two hand-written schemas drift. This is the cheap way to notice: if a table
+        # is added to one dialect and not the other, the PostgreSQL job is the only
+        # place it would otherwise show up.
+        def tables(dialect: str):
+            found = set()
+            for path in sorted((migrate.MIGRATIONS_DIR / dialect).glob("*.sql")):
+                found |= {
+                    name.lower()
+                    for name in re.findall(
+                        r"CREATE TABLE IF NOT EXISTS\s+([a-z_]+)", path.read_text(encoding="utf-8"), re.I
+                    )
+                }
+            return found
+
+        sqlite_tables = tables("sqlite")
+        postgres_tables = tables("postgres")
+        self.assertIn("ai_calls", sqlite_tables)
+        self.assertEqual(sqlite_tables, postgres_tables)
+
+    def test_the_ai_ledger_can_be_written_and_read_back_on_either_dialect(self) -> None:
+        # The row is written by hand here rather than through the store, because the
+        # point is the schema: a NOT NULL column the store forgets to fill would fail
+        # on PostgreSQL and pass on SQLite.
+        migrate.migrate(self.conn, "sqlite")
+        self.conn.execute(
+            "INSERT INTO ai_calls (product_id, kind, provider, model, prompt_hash, text, cached, ms, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (None, "vision", "openrouter", "openai/gpt-4o-mini", "abc", "a description", 0, 12, "2026-01-01T00:00:00"),
+        )
+        row = self.conn.execute("SELECT kind, model FROM ai_calls").fetchone()
+        self.assertEqual(row["kind"], "vision")
+        self.assertEqual(row["model"], "openai/gpt-4o-mini")
 
 
 class StoreBackendTests(unittest.TestCase):

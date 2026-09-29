@@ -35,7 +35,7 @@ from urllib.parse import unquote, urlparse
 
 from . import benchmark as benchmark_module
 from .bootstrap import CASES, INFEASIBLE_CASE, seed_all
-from .config import settings
+from .config import ai_settings, settings
 from .core import kb, kpi as kpi_registry, population as population_module, vision
 from .logging_setup import configure_logging, logger, new_request_id, summarise_path
 from .db import driver_available, migration_status
@@ -133,7 +133,10 @@ def catalog() -> Dict[str, Any]:
         ],
         "category_kpis": {cat: kpi_registry.kpis_for_category(cat) for cat in kb.categories()},
         "limits": kb.limits(),
+        # No store here: the catalogue describes what the interface may offer, and the
+        # budget belongs to a request (see /api/health), not to a static description.
         "vision": vision.vision_available(),
+        "ai": ai_settings().as_dict(),
         "summary": kb.summarise_kb(),
     }
 
@@ -239,7 +242,8 @@ def r_health(service: AgentService, body: Dict[str, Any], params: Dict[str, str]
         "trials": trials,
         "categories": len(kb.categories()),
         "ingredients": len(kb.ingredients()),
-        "vision": vision.vision_available(),
+        "vision": vision.vision_available(cache=service.store),
+        "ai": ai_settings().as_dict(),
         "benchmark": bool(service.store.latest_benchmark()),
         "database": getattr(service.store, "dialect", "sqlite"),
         "acceptance_model": bool(service.acceptance_model()),
@@ -435,6 +439,22 @@ def r_plan(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) 
     return service.plan_reformulation(
         _int(params["product_id"], "product_id"),
         budget=int(budget) if budget else 1600,
+    )
+
+
+@_POST("/api/products/{product_id}/ask")
+def r_ask(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """Answer a question from the product's own record.
+
+    Read-only: the model reads the record and its answer is written to the ledger, and
+    nothing else in the product changes. That is why this is a POST - a question has
+    side effects on the record's history - and why it is safe to expose without the
+    write routes' token: it cannot alter a formulation.
+    """
+    return service.ask_record(
+        _int(params["product_id"], "product_id"),
+        str(body.get("question") or ""),
+        use_model=bool(body.get("use_ai")),
     )
 
 

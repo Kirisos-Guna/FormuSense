@@ -37,8 +37,15 @@ SQLITE_MIGRATIONS = Path(__file__).resolve().parent / "db" / "migrations" / "sql
 
 
 def _load_schema() -> str:
+    """Every SQLite migration, concatenated, for the report's schema appendix.
+
+    Reading the directory rather than one filename is what keeps the published
+    schema in step with the schema the application actually creates: adding a
+    migration adds it to the appendix, and nobody has to remember to.
+    """
     try:
-        return (SQLITE_MIGRATIONS / "0001_init.sql").read_text(encoding="utf-8")
+        files = sorted(SQLITE_MIGRATIONS.glob("*.sql"))
+        return "\n\n".join(path.read_text(encoding="utf-8").rstrip() for path in files)
     except OSError:  # pragma: no cover - only if data files were stripped
         return ""
 
@@ -344,6 +351,155 @@ class Store:
                 "product_id": row["product_id"],
                 "kind": row["kind"],
                 "message": row["message"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    # -------------------------------------------------------- the model layer #
+    def save_ai_call(
+        self,
+        product_id: Optional[int],
+        kind: str,
+        provider: str,
+        model: str,
+        prompt_hash: str,
+        text: str,
+        cached: bool = False,
+        ms: int = 0,
+        usage: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Record one model reply: the cache entry and the audit line, at once.
+
+        The reply is stored rather than a pointer to it, because the cache has to
+        work when the provider does not. A cached description is the only copy of a
+        call that was already paid for, and asking again can legitimately return a
+        different answer - which would leave the product's own record contradicting
+        the report written from it.
+        """
+        cursor = self.conn.execute(
+            "INSERT INTO ai_calls (product_id, kind, provider, model, prompt_hash, text, cached, ms, usage_json, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                product_id,
+                kind,
+                provider,
+                model,
+                prompt_hash,
+                text,
+                1 if cached else 0,
+                int(ms),
+                json.dumps(usage or {}),
+                _now(),
+            ),
+        )
+        self.conn.commit()
+        return int(cursor.lastrowid)
+
+    def ai_call_by_hash(self, prompt_hash: str) -> Optional[Dict[str, Any]]:
+        """The most recent reply to this exact request, or ``None`` for a miss."""
+        row = self.conn.execute(
+            "SELECT * FROM ai_calls WHERE prompt_hash=? ORDER BY id DESC LIMIT 1", (prompt_hash,)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            usage = json.loads(row["usage_json"] or "{}")
+        except (TypeError, ValueError):
+            usage = {}
+        return {
+            "id": row["id"],
+            "provider": row["provider"],
+            "model": row["model"],
+            "text": row["text"],
+            "usage": usage if isinstance(usage, dict) else {},
+            "created_at": row["created_at"],
+        }
+
+    def attach_ai_calls(self, product_id: int, ids: Sequence[int]) -> int:
+        """Point rows recorded before the product existed at the product, now.
+
+        The image description happens before the product row is written, because the
+        hints it produces belong in the brief that row stores. Recording the call
+        against no product and adopting it a moment later keeps both properties: the
+        hints are in the brief, and the call is in the product's history rather than
+        orphaned in the table.
+        """
+        wanted = [int(i) for i in ids if i]
+        if not wanted:
+            return 0
+        placeholders = ",".join("?" for _ in wanted)
+        cursor = self.conn.execute(
+            "UPDATE ai_calls SET product_id=? WHERE id IN (" + placeholders + ")",
+            (product_id, *wanted),
+        )
+        self.conn.commit()
+        return int(cursor.rowcount or 0)
+
+    def latest_ai_call(self, product_id: int, kind: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """The most recent model reply for a product, optionally of one kind.
+
+        The text is included here, unlike in :meth:`ai_calls`: this is read to show the
+        description again, so the reply is what is wanted rather than its metadata.
+        """
+        if kind:
+            row = self.conn.execute(
+                "SELECT * FROM ai_calls WHERE product_id=? AND kind=? ORDER BY id DESC LIMIT 1",
+                (product_id, kind),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM ai_calls WHERE product_id=? ORDER BY id DESC LIMIT 1", (product_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "kind": row["kind"],
+            "provider": row["provider"],
+            "model": row["model"],
+            "text": row["text"],
+            "cached": bool(row["cached"]),
+            "created_at": row["created_at"],
+        }
+
+    def ai_calls_since(self, since: str) -> int:
+        """Paid calls recorded at or after ``since``, an ISO-8601 timestamp.
+
+        Cache hits are excluded. They cost nothing, so counting them would make the
+        hourly ceiling punish exactly the traffic the cache exists to absorb.
+        """
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM ai_calls WHERE created_at >= ? AND cached = 0", (since,)
+        ).fetchone()
+        return int(row["n"] or 0) if row is not None else 0
+
+    def ai_calls(self, product_id: Optional[int] = None, limit: int = 40) -> List[Dict[str, Any]]:
+        """The model's history, newest first, without the reply text.
+
+        The text is left out deliberately: it is the bulk of the row, and this is
+        read to answer "which model, how long ago, how slow" rather than to show the
+        description again.
+        """
+        columns = "id, product_id, kind, provider, model, cached, ms, created_at"
+        if product_id is None:
+            rows = self.conn.execute(
+                "SELECT " + columns + " FROM ai_calls ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT " + columns + " FROM ai_calls WHERE product_id=? ORDER BY id DESC LIMIT ?",
+                (product_id, limit),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "product_id": row["product_id"],
+                "kind": row["kind"],
+                "provider": row["provider"],
+                "model": row["model"],
+                "cached": bool(row["cached"]),
+                "ms": int(row["ms"] or 0),
                 "created_at": row["created_at"],
             }
             for row in rows

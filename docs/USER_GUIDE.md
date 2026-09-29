@@ -26,7 +26,7 @@ process can see as soon as the page answers:
 | --- | --- |
 | *N products, M trials* | What is on record in the database right now. |
 | *N ingredients, N categories* | The size of the loaded knowledge base. |
-| *vision: …* | Whether offline image analysis (Pillow) or a vision API key is available. Everything else works without either. |
+| *AI: …* | Which model, if any, is configured for the optional layer - for example *AI: openrouter*. Hovering it shows the model id, which free model answers if that one is busy, and how much of the hourly budget is left. With no key it reads *AI: off*, and nothing else changes. Offline image analysis needs the optional Pillow install. |
 
 The database is one SQLite file by default — nothing to install, nothing to
 configure. PostgreSQL is opt-in through `FORMUSENSE_DB_URL`.
@@ -172,6 +172,7 @@ screen — the figures there are the stored run, not a copy in the prose.
 | **%RDA** | Share of a population group's daily protein requirement that one serving delivers. |
 | **CCP** | Critical control point: a line step with a critical limit, monitoring and an action if it is exceeded. |
 | **Ledger** | The append-only audit trail for a product. |
+| **Ask** | Questions answered from this product's own record, once a model key is configured. The answer is drawn from the stored brief, formulation, prediction, trials and plan, and it lists the parts of the record it used. It cannot change anything: the question and its answer are added to the ledger, and nothing else is touched. |
 
 ---
 
@@ -189,16 +190,81 @@ python run.py --db-migrate     # apply pending database migrations
 ```
 
 No API key and no network call is needed for any of these. Pillow and Pygments
-are optional and only draw the report's figures and code listings.
+are optional and only draw the report's figures and code listings. The optional
+model layer described in section 8 is never used by these commands.
 
 ---
 
-## 8. Troubleshooting and honest limits
+## 8. The optional model layer
+
+Everything in this guide works with no API key, no network call and no third-party
+service, and that is the default. With a key configured, a model is added to three
+places - and only three - and in each of them it is an enrichment:
+
+* **Reference photographs.** The offline measurement of colour, lightness and
+  texture always runs. A model adds the semantic description on top: piece shape,
+  surface finish, visible inclusions, apparent defects and a process hypothesis.
+  Its reply is filtered to those description keys, so it cannot put a protein
+  content or a weight into the brief even if it tries.
+* **The specification text.** A model reads the text alongside what the rule-based
+  parser already extracted and reports only what appears to be missing: a claim or
+  an allergen from the registries the system holds, a declared pack size in a unit
+  the category does not use, and further questions. Those land in the brief's open
+  questions, and the claims are shown as suggestions for **you** to tick. No target,
+  pack size, cost ceiling or already-parsed claim is ever changed by it.
+* **The product record.** The **Ask** tab answers a question from a bounded extract
+  of the product's stored brief, formulation, prediction, trials and plan, naming
+  the parts of the record it used. It is read-only.
+
+To turn it on, put one key in `.env` beside `run.py` (the file is git-ignored) and
+restart the server:
+
+```
+OPENROUTER_API_KEY=sk-or-...
+```
+
+OpenRouter is the provider this is built around, because one key reaches every
+vendor's models. The default model list is free, so nothing is spent and no credit
+balance is needed: the free models come from a shared pool that answers `429` when
+somebody else is using it, so `OPENROUTER_MODEL` takes a comma-separated list and the
+next free model answers when the first one is busy. `OPENAI_API_KEY` and
+`GEMINI_API_KEY` are still honoured and go through the same client. A hosted instance
+is given its key as an environment variable in the host's dashboard, never in the
+repository.
+
+Then tick **Use the model for this run** on the **New product** form. It is off by
+default, so nothing spends a call unless you ask it to. `.env.example` lists every
+setting; the ones worth knowing:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `OPENROUTER_MODEL` | three free models | Which models to ask, in order. Free ones by default, so nothing is spent. |
+| `FORMUSENSE_AI_RETRIES` | `2` | How many times a model may answer `429` before the next one in the list is tried. A refused request is free. |
+| `FORMUSENSE_AI_REASONING` | `off` | Whether a model may think before answering. These prompts extract rather than reason, and turning it off is several times faster. |
+| `FORMUSENSE_AI` | `1` | Set to `0` to switch the layer off even when a key is present. |
+| `FORMUSENSE_AI_MODEL` | unset | Overrides the model for whichever provider the key belongs to. |
+| `FORMUSENSE_AI_MAX_CALLS_PER_HOUR` | `60` | The ceiling. `0` means no ceiling. Over it, runs continue with the offline result. |
+| `FORMUSENSE_AI_MAX_IMAGES` | `3` | How many photographs one call may carry. |
+| `FORMUSENSE_AI_TIMEOUT` | `45` | Seconds before a provider is given up on. |
+
+Two properties are worth relying on. Every reply is stored against a hash of the
+request, images included, so asking the same thing twice is answered from the
+database rather than the provider - it costs nothing and returns the same words.
+And a failure never fails a run: a revoked key, a rate limit or an unreachable
+provider is recorded as a sentence on the ledger and the product is designed,
+predicted and reported exactly as it would have been offline.
+
+---
+
+## 9. Troubleshooting and honest limits
 
 | Symptom | What to do |
 | --- | --- |
 | Nothing loads | Check the server is running and look at the terminal it was started from. If the port is taken, use `python run.py --port 9000`. |
-| Header says *vision: image analysis off* | Image analysis needs the optional Pillow install. The rest of the pipeline does not. |
+| Header says *AI: off* | No model key is configured, which is the default and affects only the optional layer. Offline image analysis additionally needs the optional Pillow install. The rest of the pipeline needs neither. |
+| *the model could not be reached* | Every model in `OPENROUTER_MODEL` refused or timed out. Free models are shared, so this is usually somebody else's traffic: press the button again, raise `FORMUSENSE_AI_MAX_CALLS_PER_HOUR`, or add another model to the list. The product was still designed, predicted and reported - only the description, the review or the answer is missing. |
+| The **Ask** tab says the record cannot be asked | No model key is configured. Set `OPENROUTER_API_KEY` and restart the server, then reload the page. |
+| The model did not run when a run asked for it | The reason is on the ledger and in the run's own output: no key, the hourly ceiling reached, nothing readable to send, or a provider that could not be reached. In every case the offline result is what was used. |
 | The Model tab is empty | No model has been trained in this database. Run `python run.py --build-dataset` then `python run.py --train`. |
 | A brief cannot be satisfied | That is a result, not a bug: the agent reports the target, the best achievable value and the reason instead of quietly missing it. |
 | A PostgreSQL error | The default is SQLite. PostgreSQL is opt-in through `FORMUSENSE_DB_URL`; migrations for both dialects live in `app/db/migrations/`. Run `python run.py --db-check`: it writes and reads back one of every record the app keeps and names the step that fails. |

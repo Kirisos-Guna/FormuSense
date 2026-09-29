@@ -66,6 +66,79 @@ width, and form controls are 16 px so mobile browsers do not zoom on focus.
 The rules that fixed each measured overflow are locked in by `tests/test_ui.py`,
 which runs without a browser.
 
+## The optional model layer (OpenRouter)
+
+Everything in this README runs with no key, no network access and no third-party
+call at runtime, and that is the mode the tests and the CI pipeline cover. A key
+adds a model to three places, and in all three it is an enrichment rather than a
+dependency:
+
+| Surface | What the model adds | What it is not allowed to do |
+| --- | --- | --- |
+| The reference photograph | A semantic description: piece shape, surface finish, visible inclusions, apparent defects, a process hypothesis | Set a composition value. The reply is filtered to eight description keys and anything numeric is discarded before the brief sees it |
+| The specification text | A second reader that reports the claims, allergens and unit disagreements a rule-based parser misses | Change the brief. Its findings are appended to the brief's open questions and to nothing else, so every target, pack size and cost ceiling stays exactly as parsed |
+| The product record | Questions answered from the stored brief, formulation, prediction, trials and plan, with the parts of the record it used | Alter the record. The question and answer are written to the ledger; nothing else is touched |
+
+Configure it by copying `.env.example` to `.env` - which is git-ignored, and the
+only place a key should ever live locally; the launcher reads that file at startup,
+and a variable already set in the environment wins over it - and setting one
+variable:
+
+```
+OPENROUTER_API_KEY=sk-or-...
+```
+
+OpenRouter is the provider the integration is built around, because a single key
+there reaches every vendor's models. `OPENAI_API_KEY` and `GEMINI_API_KEY` still
+work, through the same client rather than a second one.
+
+**The defaults are free models.** With a key and no other setting, the layer asks
+`qwen/qwen3.8-27b:free` first, then `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`,
+then `dots-studio/dots-3-note-preview:free` - each one asked for a real description of
+a test image before it was listed, and each one answering with all eight expected
+keys. A demonstration therefore costs nothing and needs no credit balance, and a run
+that somehow reaches all three failing says so and falls back to the offline result
+rather than spending. `OPENROUTER_MODEL` takes a comma-separated list, tried in
+order, and that list is the mechanism: OpenRouter's free models are served from a
+shared pool that answers `429` whenever somebody else is using it, one model's pool is
+not another's, and a paid model can be added to the same list by anyone who would
+rather spend a fraction of a rupee than wait:
+
+```
+OPENROUTER_MODEL=qwen/qwen3.8-27b:free,qwen/qwen3.8-27b
+```
+
+Three settings make a free model usable in practice. `FORMUSENSE_AI_RETRIES` (2 by
+default) is how many times a model may answer `429` before the next model in the list
+is tried - a refused request costs nothing, so this buys a few seconds, not rupees.
+`FORMUSENSE_AI_REASONING` (off by default) turns off thinking before answering: these
+three prompts extract rather than reason, and on the default model that was measured
+at three times slower on twenty times the output tokens, which are the expensive half.
+And a reply that arrives as prose instead of the object it was asked for - which free
+models do intermittently - is asked for once more in words, because to the parser a
+prose reply and a review that found nothing look exactly alike, and "found nothing" is
+a legitimate answer. The repair turn is a second billed call, and both are counted in
+what the ledger records the call as costing.
+
+Four things bound it, and each is enforced in code rather than promised:
+
+* **It is opt-in per run.** The switch on the **New product** form is off by
+  default, so no run spends a call unless somebody asks it to.
+* **There is an hourly ceiling** (`FORMUSENSE_AI_MAX_CALLS_PER_HOUR`, 60 by
+  default, `0` for none). Over it, a run completes with the offline result and
+  says why rather than failing.
+* **Every reply is cached** against a hash of the request, image bytes included.
+  Asking the same question about the same photograph again is served from the
+  record, costs nothing and returns the same words.
+* **A failure is contained.** A revoked key, a rate limit, a timeout or an
+  unreachable provider is recorded as a sentence on the ledger; the product is
+  still designed, predicted and reported normally.
+
+The header pill reports what is actually configured - the provider, the model, which
+model answers if it is busy, and the remaining hourly budget on hover. With no key it reads `AI: off`, and
+nothing about the application changes except that there is no model description,
+no specification review and no record chat.
+
 ## Live demo
 
 The application is a Python server, so it needs a host that runs processes - a
@@ -80,8 +153,12 @@ built by the `Dockerfile` and described by `render.yaml`:
   minutes so that a judge does not meet that wait.
 * It runs exactly this code, on the bundled SQLite record, seeded with the
   demonstration cases before the port opens (`FORMUSENSE_SEED_ON_START`), with the
-  acceptance model trained from the dataset during the image build. Nothing is
-  fetched from a third party at runtime and no API key exists anywhere in it.
+  acceptance model trained from the dataset during the image build. No key is
+  stored in this repository or in the image: the container is key-free unless a key
+  is supplied as an environment variable in the host's dashboard, and every
+  capability works without one. If the instance you are looking at has one set, it
+  is bounded by the hourly ceiling in `render.yaml` and the model only ever adds
+  description, questions and answers.
 * Reads and writes are open, so the app can actually be used: create a product,
   run a trial, plan the next version, read the ledger. The record is recreated
   whenever Render recycles the instance, which is why the boot seed exists.
@@ -231,6 +308,7 @@ Speaker notes are not embedded; the deck is content-complete without them.
 run.py                  launcher: server, seed, benchmark, report, slides
 app/core/               knowledge base, models, generation, optimisation, diagnosis, planning, population guidance
 app/ml/                 dataset, features, models, evaluation and the trained-model registry (offline)
+app/ai/                 the optional model layer: one OpenAI-compatible client + prompts
 app/config.py           environment-driven settings
 app/logging_setup.py    process logging and request ids
 app/data/               ingredients.json, processes.json, limits.json, dri_profiles.json, formusense.db, figures

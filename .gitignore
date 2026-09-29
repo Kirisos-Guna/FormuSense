@@ -11,6 +11,10 @@ app/data/formusense.db-wal
 # Generated report figures (recreated with: python run.py --report)
 app/data/figures/
 
+# Reference photographs uploaded through the interface: record content, written on
+# request, never part of the source
+app/data/uploads/
+
 # Built dataset and trained model (recreated offline, no API key needed):
 #   python run.py --build-dataset && python run.py --train
 app/data/datasets/

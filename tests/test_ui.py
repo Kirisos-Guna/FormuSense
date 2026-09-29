@@ -99,7 +99,7 @@ class GuideContentTests(unittest.TestCase):
         tabs = self._tabs()
         self.assertEqual(
             tabs,
-            ["overview", "prediction", "populations", "trials", "plan", "process", "report", "ledger"],
+            ["overview", "prediction", "populations", "trials", "plan", "process", "report", "ledger", "ask"],
         )
 
     def test_the_in_app_guide_covers_every_product_tab(self) -> None:
@@ -301,6 +301,89 @@ class StaticServingTests(unittest.TestCase):
         status, _, body = self.get("/product/12/overview")
         self.assertEqual(status, 200)
         self.assertTrue(body.lstrip().startswith("<!DOCTYPE html>"))
+
+
+class AiInterfaceTests(unittest.TestCase):
+    """The interface's side of the model layer.
+
+    Three things have to hold in the browser: a run spends nothing unless the box is
+    ticked, the status pill says what is really configured, and an API key is never
+    typed into, stored by, or read back from the page.
+    """
+
+    def setUp(self) -> None:
+        self.app = read(WEB / "app.js")
+        self.index = read(WEB / "index.html")
+
+    def test_the_model_is_used_only_when_the_run_asks_for_it(self) -> None:
+        self.assertIn("id='f-use-ai'", self.app)
+        self.assertIn('use_ai: !!((document.getElementById("f-use-ai") || {}).checked)', self.app)
+        # The switch is dead unless a key is really configured, so it cannot be ticked
+        # on a deployment that has no model to spend.
+
+    def test_the_switch_cannot_be_ticked_without_a_model(self) -> None:
+        # The switch is dead unless a key is really configured, so it cannot be ticked
+        # on a deployment that has no model to spend against.
+        fragment = """id='f-use-ai'" + (on ? "" : " disabled")"""
+        self.assertIn(fragment, self.app, "the run switch no longer follows whether a model exists")
+
+    def test_the_status_pill_reports_the_model_it_really_has(self) -> None:
+        # It used to read a key nothing ever set, so every deployment said "AI: API".
+        for fragment in ("vision.configured", "vision.model", "budget.remaining"):
+            self.assertIn(fragment, self.app)
+
+    def test_the_status_pill_refuses_to_claim_a_model_it_does_not_have(self) -> None:
+        # Offline is a state the interface has to be able to say out loud, because the
+        # badge is where a reader decides whether the model layer is on.
+        self.assertIn('"AI: off"', self.app)
+        self.assertIn('"AI: off (Pillow analysis only)"', self.app)
+        self.assertIn("No model key is set (see the README)", self.app)
+
+    def test_the_reference_description_is_shown_on_the_overview(self) -> None:
+        # The description costs a call. Returning it and rendering it nowhere would
+        # make the whole vision layer invisible to the person who paid for it.
+        self.assertIn("product.vision", self.app)
+        self.assertIn("vision.lines", self.app)
+        self.assertIn("adds no numbers to the brief", self.app)
+
+    def test_the_ask_tab_posts_the_question_and_renders_the_answer_with_its_model(self) -> None:
+        self.assertIn("function tabAsk(product)", self.app)
+        self.assertIn('/ask", { question: asked, use_ai: true }', self.app)
+        for fragment in ("answer.model", "answer.cached"):
+            self.assertIn(fragment, self.app)
+
+    def test_a_question_the_record_cannot_answer_says_so_rather_than_showing_nothing(self) -> None:
+        self.assertIn('if (!result.answer) toast(result.note', self.app)
+
+    def test_the_pages_never_name_the_vendor_behind_the_model(self) -> None:
+        # The vendor is an implementation detail: it changes with a key in the
+        # environment, and a reader deciding whether to press the switch is answering a
+        # different question. The record still carries the model id it really used.
+        for name in ASSETS:
+            body = read(WEB / name)
+            self.assertNotIn("openrouter", body.lower(), name + " names the model vendor")
+        # The record still carries the model id that really answered, so the id is shown
+        # and only the vendor behind it is kept out of the page.
+        self.assertIn("vision.model", self.app)
+
+    def test_the_model_disclosure_beside_the_switch_is_one_short_line(self) -> None:
+        # This used to be a paragraph listing every model in the chain; the point of the
+        # line is only that the model is optional and sets no numbers.
+        self.assertNotIn("modelFallback", self.app)
+        self.assertIn("no number in the record comes from it", self.app)
+        self.assertNotIn("It never sets a target, a pack size or a cost", self.app)
+
+    def test_no_api_key_is_ever_typed_into_or_stored_by_the_page(self) -> None:
+        # The key lives in the server's environment. A page that accepted one would
+        # have to hold it somewhere in the browser, which is the failure this avoids.
+        for name in ASSETS:
+            body = read(WEB / name)
+            for fragment in ("apiKey", "api_key", "Bearer ", "sk-or-"):
+                self.assertNotIn(fragment, body, name + " handles a key")
+        self.assertNotIn('type="password"', self.index)
+        fields = re.findall(r"<input[^>]*id='([^']+)'", self.index + self.app)
+        self.assertTrue(fields)
+        self.assertEqual([name for name in fields if "key" in name.lower()], [])
 
 
 if __name__ == "__main__":  # pragma: no cover
