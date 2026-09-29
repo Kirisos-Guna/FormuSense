@@ -175,12 +175,13 @@ def _beverage_facts(benchmark: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if case is None:  # pragma: no cover - the case ships with the project
         return {}
     numbers = brief_module.parse_spec_numbers(str(case.get("spec_text", "")))
-    unit_weight = (numbers.get("__unit_weight_g") or {}).get("value")
+    pack = numbers.get("__pack_size") or {}
     protein_per_100 = (numbers.get("protein_g") or {}).get("value")
     facts: Dict[str, Any] = {
         "name": case.get("name", ""),
         "spec_text": case.get("spec_text", ""),
-        "unit_weight_g": unit_weight,
+        "pack_size": pack.get("value"),
+        "pack_unit": pack.get("unit") or "ml",
         "protein_g_per_100": protein_per_100,
         "protein_g_per_serving": (numbers.get("protein_g") or {}).get("per_serving"),
         "sugar_g_per_100": (numbers.get("sugar_g") or {}).get("value"),
@@ -692,9 +693,10 @@ def _slide_6(f: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     population = f["population"]
     cards: List[Dict[str, Any]] = []
     if product:
-        unit = product.get("unit_weight_g")
+        unit = product.get("pack_size")
+        unit_name = product.get("pack_unit") or "ml"
         protein = product.get("protein_g_per_serving") or product.get("protein_g_per_100")
-        note = f"{_plain(unit, ' ml')} bottle, ready to drink" if unit else "per serving"
+        note = f"{_plain(unit)} {unit_name} bottle, ready to drink" if unit else "per serving"
         cards.append(_card(f"{_plain(protein)} g", "protein per bottle", note))
         cards.append(
             _card(f"{_plain(product.get('sugar_g_per_100'))} g",

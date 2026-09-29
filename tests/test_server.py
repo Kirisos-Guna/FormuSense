@@ -59,6 +59,12 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(category["unit_operations"])
             for slot in category["slots"]:
                 self.assertLess(slot["min_pct"], slot["max_pct"])
+            # The form labels its pack-size field from this, so every category has to
+            # say which unit its pack is stated in.
+            self.assertIn(category["pack_unit"], ("g", "ml"))
+        units = {c["id"]: c["pack_unit"] for c in catalog["categories"]}
+        self.assertEqual(units["beverage"], "ml")
+        self.assertEqual({u for c, u in units.items() if c != "beverage"}, {"g"})
         for ingredient in catalog["ingredients"]:
             self.assertTrue(ingredient["id"])
             self.assertTrue(ingredient["name"])

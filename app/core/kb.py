@@ -156,6 +156,10 @@ class Category:
     slots: tuple
     parameters: tuple
     unit_operations: tuple
+    #: The unit this category's pack size is stated in: "g", or "ml" for a product
+    #: sold by volume. A drink is bottled in millilitres, so the brief, the interface
+    #: and the process sheet say millilitres for it; everything else is by weight.
+    pack_unit: str = "g"
 
     def slot(self, slot_id: str) -> Optional[Slot]:
         for slot in self.slots:
@@ -185,6 +189,17 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _pack_unit(record: Dict[str, Any]) -> str:
+    """The unit the category's pack size is stated in.
+
+    Only the categories that sell by volume declare this; the rest are weighed, so
+    anything unrecognised falls back to grams rather than labelling a cookie in
+    millilitres.
+    """
+    unit = str(record.get("pack_unit") or "g").strip().lower()
+    return unit if unit in ("g", "ml") else "g"
 
 
 @lru_cache(maxsize=1)
@@ -277,6 +292,7 @@ def categories() -> Dict[str, Category]:
                 for p in record["parameters"]
             ),
             unit_operations=tuple(record["unit_operations"]),
+            pack_unit=_pack_unit(record),
         )
     return out
 

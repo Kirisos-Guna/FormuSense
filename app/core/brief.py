@@ -166,16 +166,23 @@ _NUM_PATTERNS: Dict[str, List[str]] = {
 _MONTH_PATTERN = (
     r"shelf\s*life" + _GAP + r"([\d.]+)\s*(month|months|mo|year|years|day|days)"
 )
-_UNIT_WEIGHT_PATTERNS = [
-    r"(?:unit|net|pack|piece|serving|bar|biscuit)\s*weight" + _GAP + r"([\d.]+)\s*(kg|g|gram)",
+# The pack size, with the unit it was declared in. A beverage is sold by volume and
+# everything else by weight, so the unit is carried out of the parse rather than
+# assumed: it is what the brief, the interface and the process sheet have to print.
+# Millilitres and grams are the same number at a density near 1 g/ml, which is the
+# convention the target maths uses, and the nutrition engine applies the real
+# density when it reports per 100 ml.
+_PACK_SIZE_PATTERNS = [
+    r"(?:unit|net|pack|piece|serving|bar|biscuit)\s*weight"
+    + _GAP
+    + r"([\d.]+)\s*(kg|g|gram|ml|litre|liter|l)\b",
     r"([\d.]+)\s*(kg)\s*(?:pack|pouch|box|unit)",
-    r"per\s*(?:unit|piece|pack|bar)" + _GAP + r"([\d.]+)\s*(g|gram)",
+    r"per\s*(?:unit|piece|pack|bar)" + _GAP + r"([\d.]+)\s*(g|gram|ml)\b",
     r"([\d.]+)\s*(g|gram)\s*(?:pack|pouch|unit|bar|piece|serving)",
-    # A beverage is sized in millilitres, not grams. For a drink of density near
-    # 1 g/ml the two are interchangeable for target purposes, and the nutrition
-    # engine applies the real density when it reports per 100 ml.
-    r"([\d.]+)\s*(ml)\s*(?:bottle|can|tetra|carton|jar|pack|pouch)",
-    r"(?:unit|net|pack|serving|bottle|can|jar|carton)\s*weight" + _GAP + r"([\d.]+)\s*(ml|kg|g|gram)",
+    r"([\d.]+)\s*(ml|litre|liter|l)\s*(?:bottle|can|tetra|carton|jar|pack|pouch)",
+    r"(?:unit|net|pack|serving|bottle|can|jar|carton)\s*(?:weight|volume)"
+    + _GAP
+    + r"([\d.]+)\s*(ml|litre|liter|kg|g|gram)",
 ]
 
 # Nutrient figures are quoted per 100 g by convention, but a supplement is
@@ -211,13 +218,28 @@ def _first_number(text: str, patterns: Iterable[str]) -> Optional[float]:
     return None
 
 
-def _declared_unit_weight(text: str) -> Optional[float]:
-    """The declared net/unit weight in grams (millilitres treated as grams)."""
-    for pattern in _UNIT_WEIGHT_PATTERNS:
+def _declared_pack_size(text: str) -> Optional[Tuple[float, str]]:
+    """The declared pack size as ``(value, unit)``, where the unit is "g" or "ml".
+
+    A beverage is sized in millilitres, not grams, and the unit leaves this function
+    with the number: the brief, the interface and the process sheet print what the
+    pack says. Kilograms and litres are converted, so ``1 kg pouch`` arrives as 1000
+    g and ``1 litre bottle`` as 1000 ml.
+    """
+    for pattern in _PACK_SIZE_PATTERNS:
         match = re.search(pattern, text, re.IGNORECASE)
-        if match:
+        if not match:
+            continue
+        try:
             value = float(match.group(1))
-            return value * 1000.0 if match.group(2).lower().startswith("k") else value
+        except (TypeError, ValueError):
+            continue
+        unit = match.group(2).strip().lower()
+        if unit.startswith("k"):
+            return value * 1000.0, "g"
+        if unit.startswith("l"):
+            return value * 1000.0, "ml"
+        return value, "ml" if unit == "ml" else "g"
     return None
 
 
@@ -248,7 +270,11 @@ def parse_spec_numbers(text: str) -> Dict[str, Dict[str, Any]]:
     the original declaration alongside the derived target.
     """
     out: Dict[str, Dict[str, Any]] = {}
-    unit_weight = _declared_unit_weight(text)
+    pack = _declared_pack_size(text)
+    # A pack declared in millilitres is read as grams for the per-serving conversion
+    # below: the two are the same number at a density near 1 g/ml, and the category's
+    # own unit is applied to the brief once the category is known.
+    unit_weight = pack[0] if pack else None
     for kpi_id, patterns in _NUM_PATTERNS.items():
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -294,8 +320,14 @@ def parse_spec_numbers(text: str) -> Dict[str, Dict[str, Any]]:
             value *= 365.0
         out["shelf_life_days"] = {"value": value, "comparator": "", "evidence": shelf.group(0).strip()}
 
-    if unit_weight:
-        out["__unit_weight_g"] = {"value": unit_weight, "comparator": "", "evidence": "declared net weight"}
+    if pack:
+        size, unit = pack
+        out["__pack_size"] = {
+            "value": size,
+            "unit": unit,
+            "comparator": "",
+            "evidence": "declared net volume" if unit == "ml" else "declared net weight",
+        }
     return out
 
 
@@ -622,6 +654,32 @@ def open_questions(brief: Brief) -> List[str]:
     return questions
 
 
+def _clean_pack_unit(value: Any, fallback: str) -> str:
+    unit = str(value or "").strip().lower()
+    return unit if unit in ("g", "ml") else fallback
+
+
+def _pack_size_for(
+    payload: Dict[str, Any], numbers: Dict[str, Dict[str, Any]], category: kb.Category
+) -> Tuple[float, str]:
+    """The pack size the brief is built with: ``(size, unit)``, the unit "g" or "ml".
+
+    Three sources, in order: what the form sent, whose field is labelled with the
+    category's own unit; then what the specification text declared; then the
+    category's typical pack. A drink is sized in millilitres and everything else in
+    grams. The size doubles as the mass the models work in, because a product of
+    density near 1 g/ml is one gram per millilitre - and the nutrition engine applies
+    the real density when it reports per 100 ml.
+    """
+    sent = payload.get("unit_weight_g")
+    if sent:
+        return float(sent), _clean_pack_unit(payload.get("unit"), category.pack_unit)
+    declared = numbers.get("__pack_size") or {}
+    if declared.get("value"):
+        return float(declared["value"]), _clean_pack_unit(declared.get("unit"), category.pack_unit)
+    return float(category.typical_unit_weight_g), category.pack_unit
+
+
 def build_brief(payload: Dict[str, Any]) -> Brief:
     """Build a brief from an API/UI payload, parsing any free-text specification."""
     spec_text = str(payload.get("spec_text") or payload.get("specification") or "")
@@ -650,11 +708,7 @@ def build_brief(payload: Dict[str, Any]) -> Brief:
     if diet not in ("vegan", "vegetarian", "any"):
         diet = "vegetarian"
 
-    unit_weight = payload.get("unit_weight_g")
-    if not unit_weight:
-        unit_weight = numbers.get("__unit_weight_g", {}).get("value")
-    if not unit_weight:
-        unit_weight = kb.category(category).typical_unit_weight_g
+    declared_size, declared_unit = _pack_size_for(payload, numbers, kb.category(category))
 
     cost_ceiling = payload.get("cost_ceiling_inr_kg") or overrides.get("cost_inr_kg")
 
@@ -665,7 +719,9 @@ def build_brief(payload: Dict[str, Any]) -> Brief:
     brief = Brief(
         product_name=product_name,
         category=category,
-        unit_weight_g=float(unit_weight),
+        unit_weight_g=float(declared_size),
+        declared_unit=declared_unit,
+        declared_unit_size=float(declared_size),
         description=description or _first_sentence(spec_text),
         claims=claims,
         diet=diet,
@@ -706,6 +762,10 @@ def summary(brief: Brief) -> Dict[str, Any]:
         "category_label": kb.category(brief.category).label,
         "description": brief.description,
         "unit_weight_g": brief.unit_weight_g,
+        # What the pack says: a drink is declared in millilitres, everything else in
+        # grams. The interface prints these, so the summary has to carry them.
+        "declared_unit": brief.declared_unit,
+        "declared_unit_size": brief.declared_unit_size,
         "diet": brief.diet,
         "claims": [rule["label"] for rule in kb.claim_rules() if rule["id"] in brief.claims],
         "claim_ids": list(brief.claims),

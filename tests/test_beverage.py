@@ -32,7 +32,9 @@ class SpecParsingTests(unittest.TestCase):
         # 20 g per 200 g serving -> 10 g per 100 g.
         self.assertAlmostEqual(numbers["protein_g"]["value"], 10.0, delta=0.01)
         self.assertEqual(numbers["protein_g"].get("basis"), "per serving")
-        self.assertAlmostEqual(numbers["__unit_weight_g"]["value"], 200.0, delta=0.01)
+        # The pack is a 200 ml bottle, so the pack size carries the volume unit.
+        self.assertAlmostEqual(numbers["__pack_size"]["value"], 200.0, delta=0.01)
+        self.assertEqual(numbers["__pack_size"]["unit"], "ml")
 
     def test_a_number_quoted_per_100ml_is_not_converted(self) -> None:
         numbers = brief_module.parse_spec_numbers("Sugars not more than 6 g per 100 ml.")
@@ -55,6 +57,34 @@ class SpecParsingTests(unittest.TestCase):
         self.assertAlmostEqual(protein.target, 10.0, delta=0.05)
         shelf = brief.target("shelf_life_days")
         self.assertAlmostEqual(shelf.target, 180.0, delta=0.5)
+
+    def test_a_liquid_brief_is_declared_in_millilitres(self) -> None:
+        brief = brief_module.build_brief(
+            {
+                "product_name": beverage_case()["name"],
+                "category": "beverage",
+                "spec_text": beverage_case()["spec_text"],
+                "unit_weight_g": beverage_case()["unit_weight_g"],
+            }
+        )
+        self.assertEqual(brief.declared_unit, "ml")
+        self.assertAlmostEqual(brief.declared_unit_size, 200.0, delta=0.01)
+
+    def test_the_seeded_beverage_case_keeps_its_published_pack_size(self) -> None:
+        # The benchmark publishes "10 g protein per 100 ml" for a 200 ml bottle;
+        # the liquid-unit change must not move the mass the models work in.
+        brief = brief_module.build_brief(
+            {
+                "product_name": beverage_case()["name"],
+                "category": "beverage",
+                "spec_text": beverage_case()["spec_text"],
+                "unit_weight_g": beverage_case()["unit_weight_g"],
+            }
+        )
+        self.assertAlmostEqual(brief.unit_weight_g, 200.0, delta=0.01)
+        self.assertAlmostEqual(
+            brief.target("protein_g").target, 20.0 * 100.0 / 200.0, delta=0.5
+        )
 
     def test_beverage_category_is_inferred_from_a_written_brief(self) -> None:
         category, confidence, _ = brief_module.infer_category(

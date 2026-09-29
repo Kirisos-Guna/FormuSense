@@ -2,7 +2,7 @@
   "_meta": {
     "name": "FormuSense process & category library",
     "version": "1.0",
-    "note": "Each category declares formulation slots (what kind of ingredient goes where and roughly how much), a unit-operation sequence and the process parameters the physics engine consumes. Parameter ids used by the engine: bake_temp_c, bake_time_min, water_added_pct, sheet_thickness_mm, cook_temp_c, cook_time_min, hot_fill_temp_c, blend_time_min, roast_temp_c, barrel_temp_c, screw_speed_rpm, feed_moisture_pct, dryer_temp_c, dryer_time_min, syrup_temp_c, cooling_temp_c, hydration_temp_c, heat_treat_temp_c, hold_time_s, fill_temp_c."
+    "note": "Each category declares formulation slots (what kind of ingredient goes where and roughly how much), a unit-operation sequence and the process parameters the physics engine consumes. A category may also declare pack_unit, the unit its pack size is stated in: ml for a product sold by volume (a drink), g otherwise. typical_unit_weight_g is then the mass the models work in, and for a density near 1 g/ml the two numbers are the same. Parameter ids used by the engine: bake_temp_c, bake_time_min, water_added_pct, sheet_thickness_mm, cook_temp_c, cook_time_min, hot_fill_temp_c, blend_time_min, roast_temp_c, barrel_temp_c, screw_speed_rpm, feed_moisture_pct, dryer_temp_c, dryer_time_min, syrup_temp_c, cooling_temp_c, hydration_temp_c, heat_treat_temp_c, hold_time_s, fill_temp_c."
   },
   "categories": {
     "cookie": {
@@ -195,6 +195,7 @@
     },
     "beverage": {
       "label": "Ready-to-drink beverage",
+      "pack_unit": "ml",
       "typical_moisture_pct": [78, 92],
       "typical_aw": [0.95, 0.995],
       "typical_unit_weight_g": 200,

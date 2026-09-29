@@ -172,6 +172,45 @@ class ScriptHealthTests(unittest.TestCase):
         self.assertIn("grid-template-columns: minmax(0, 1fr);", css)
 
 
+class PackFieldTests(unittest.TestCase):
+    """The pack-size field is a weight for a cookie and a volume for a drink.
+
+    The form used to offer one field, permanently labelled "Unit weight (g)". On a
+    beverage that asked the formulator to convert a 200 ml bottle into grams by
+    hand, and the number then disagreed with the label on the pack. The label now
+    comes from the category's own unit, and the Overview prints the unit with the
+    size instead of always printing grams.
+    """
+
+    def setUp(self) -> None:
+        self.app = read(WEB / "app.js")
+
+    def test_the_field_is_labelled_from_the_categorys_own_unit(self) -> None:
+        self.assertIn("function packUnit(", self.app)
+        self.assertIn('pack_unit === "ml"', self.app)
+        self.assertIn('"Unit volume (ml)"', self.app)
+        self.assertIn('"Unit weight (g)"', self.app)
+        # Neither label may be hard-coded into the template: the field carries the
+        # one the selected category produces.
+        self.assertIn('id=\'f-unit-label\'', self.app)
+        self.assertIn("packFieldLabel(category)", self.app)
+
+    def test_the_label_follows_the_category_the_user_selects(self) -> None:
+        self.assertIn("function refreshPackField(", self.app)
+        self.assertIn(
+            'categorySelect.addEventListener("change", refreshPackField)',
+            self.app,
+            "changing category must relabel the pack-size field",
+        )
+
+    def test_the_form_sends_the_unit_it_labelled_the_field_with(self) -> None:
+        self.assertIn("unit: packUnit(", self.app)
+
+    def test_the_overview_prints_the_declared_unit_with_the_size(self) -> None:
+        self.assertIn("brief.declared_unit_size", self.app)
+        self.assertIn("brief.declared_unit", self.app)
+
+
 class ResponsiveTests(unittest.TestCase):
     """The interface has to work on a phone, not just survive on one.
 

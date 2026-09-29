@@ -144,6 +144,11 @@ class Brief:
     product_name: str
     category: str
     unit_weight_g: float
+    #: What the pack says and how the interface prints it: a drink is declared in
+    #: millilitres and everything else in grams. ``unit_weight_g`` stays the mass the
+    #: models work in, so the two agree at a density near 1 g/ml.
+    declared_unit: str = "g"
+    declared_unit_size: Optional[float] = None
     description: str = ""
     claims: List[str] = field(default_factory=list)
     diet: str = "vegan"
@@ -166,6 +171,8 @@ class Brief:
             "product_name": self.product_name,
             "category": self.category,
             "unit_weight_g": self.unit_weight_g,
+            "declared_unit": self.declared_unit,
+            "declared_unit_size": self.declared_unit_size,
             "description": self.description,
             "claims": list(self.claims),
             "diet": self.diet,

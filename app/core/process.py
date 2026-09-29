@@ -45,6 +45,10 @@ def plan(formulation: Formulation, brief: Optional[Brief] = None, batch_size_kg:
     comp = nutrition.analyse(formulation, final_moisture=_predicted_moisture(formulation))
     yield_pct = comp.aggregates.get("final_total_g", 100.0)
     unit_weight = brief.unit_weight_g if brief else category.typical_unit_weight_g
+    # A drink is filled by volume, so its weights-and-measures check has to say so.
+    declared_unit = (brief.declared_unit if brief else "") or category.pack_unit
+    declared_size = (brief.declared_unit_size if brief else None) or unit_weight
+    declared_measure = "volume" if declared_unit == "ml" else "weight"
 
     operations: List[Dict[str, Any]] = []
     cumulative = 0
@@ -110,7 +114,10 @@ def plan(formulation: Formulation, brief: Optional[Brief] = None, batch_size_kg:
         },
         {
             "point": "Weights and measures",
-            "limit": f"Net weight {unit_weight:.0f} g, tolerance as declared (typically -2% to +4% individual)",
+            "limit": (
+                f"Net {declared_measure} {declared_size:.0f} {declared_unit}, "
+                "tolerance as declared (typically -2% to +4% individual)"
+            ),
             "control": "Check-weigher on 100% of packs; manual check of 10 packs per hour.",
             "action": "Reject out-of-tolerance packs; re-fill and re-verify the filler.",
         },

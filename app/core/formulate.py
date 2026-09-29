@@ -415,6 +415,8 @@ def reference_values(category: str, diet: str = "vegetarian") -> Dict[str, float
             product_name="reference",
             category=category,
             unit_weight_g=kb.category(category).typical_unit_weight_g,
+            declared_unit=kb.category(category).pack_unit,
+            declared_unit_size=kb.category(category).typical_unit_weight_g,
             diet=diet,
         )
         formulation = _build(

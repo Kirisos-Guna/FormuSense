@@ -69,6 +69,13 @@ Prefer your own product? **New product** takes your specification text. If you
 would rather not write one, press an example brief chip to fill the form from a
 seeded case and then edit it.
 
+The pack-size field is labelled in the unit the product is sold in: **Unit
+volume (ml)** for a beverage, **Unit weight (g)** for everything else. It
+follows the category you pick, and the number you type is read in that unit -
+a drink does not have to be converted into grams by hand. You can leave it
+blank: the size is then taken from the specification text (`200 ml bottle`,
+`1 litre bottle`, `40 g pack`) or from the category's usual pack.
+
 ---
 
 ## 3. The loop, step by step
@@ -152,6 +159,7 @@ screen — the figures there are the stored run, not a copy in the prose.
 | --- | --- |
 | **Brief** | The written specification, and what the agent understood from it. |
 | **Slot** | A role in the recipe for a category (the protein slot, the sweetener slot). Ingredients compete for slots under their inclusion limits. |
+| **Pack size** | The size of one unit as the pack declares it: millilitres for a product sold by volume (a beverage), grams otherwise. The brief, the form, the process sheet and the report all print the declared unit. The models work in mass, and millilitres and grams are the same number at a density near 1 g/ml. |
 | **KPI** | A measurable characteristic: protein, moisture, water activity, pH, sodium, cost, texture. |
 | **Hard target** | A KPI that must be inside its tolerance for the product to pass. |
 | **Objective** | A priority-weighted geometric mean of desirability across every KPI. Higher is better; 1.0 is every target on its ideal. |

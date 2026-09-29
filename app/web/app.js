@@ -216,6 +216,34 @@
     });
   }
 
+  /* The pack size is a volume for a drink and a weight for everything else, and the
+     form says which. Asking for a "unit weight (g)" on a beverage makes the
+     formulator convert a bottle into grams by hand, and the number then disagrees
+     with the label printed on the pack. */
+  function categoryInfo(categoryId) {
+    var list = (state.catalog || {}).categories || [];
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i].id === categoryId) return list[i];
+    }
+    return {};
+  }
+
+  function packUnit(categoryId) {
+    return categoryInfo(categoryId).pack_unit === "ml" ? "ml" : "g";
+  }
+
+  function packFieldLabel(categoryId) {
+    return packUnit(categoryId) === "ml" ? "Unit volume (ml)" : "Unit weight (g)";
+  }
+
+  function packPlaceholder(categoryId) {
+    var info = categoryInfo(categoryId);
+    var unit = packUnit(categoryId);
+    return info.typical_unit_weight_g
+      ? "typically " + info.typical_unit_weight_g + " " + unit + ", or from the spec text"
+      : "from the spec text";
+  }
+
   /* ------------------------------------------------------------------ new */
   function renderNew(prefill) {
     setActiveNav("new");
@@ -241,7 +269,7 @@
     html.push("<label class='field'><span>Diet</span><select id='f-diet'>" +
       ["vegetarian", "vegan", "any"].map(function (d) { return "<option>" + d + "</option>"; }).join("") +
       "</select></label>");
-    html.push("<label class='field'><span>Unit weight (g)</span><input type='number' id='f-unit' step='1' value='" + esc(prefill && prefill.unit_weight_g || "") + "' placeholder='from the spec text'></label>");
+    html.push("<label class='field'><span id='f-unit-label'>" + esc(packFieldLabel(category)) + "</span><input type='number' id='f-unit' step='1' value='" + esc(prefill && prefill.unit_weight_g || "") + "' placeholder='" + esc(packPlaceholder(category)) + "'></label>");
     html.push("</div>");
     html.push("<div class='field'><span>Claims to substantiate</span><div class='checks' id='f-claims'>" +
       (catalog.claims || []).map(function (claim) {
@@ -339,6 +367,18 @@
       document.getElementById("p-sodium").value = values.sodium_carry;
       document.getElementById("p-inversion").value = values.sugar_inversion;
     });
+    var categorySelect = document.getElementById("f-category");
+    function refreshPackField() {
+      var label = document.getElementById("f-unit-label");
+      var field = document.getElementById("f-unit");
+      if (label) label.textContent = packFieldLabel(categorySelect.value);
+      if (field) field.placeholder = packPlaceholder(categorySelect.value);
+    }
+    if (categorySelect) {
+      categorySelect.addEventListener("change", refreshPackField);
+      refreshPackField();
+    }
+
     var specField = document.getElementById("f-spec");
     var design = document.getElementById("btn-design");
     var hint = document.getElementById("design-hint");
@@ -361,6 +401,7 @@
         if (payload.category) document.getElementById("f-category").value = payload.category;
         if (payload.diet) document.getElementById("f-diet").value = payload.diet;
         if (payload.unit_weight_g) document.getElementById("f-unit").value = payload.unit_weight_g;
+        refreshPackField();
         Array.prototype.forEach.call(document.querySelectorAll("#f-claims input"), function (input) {
           input.checked = (payload.claims || []).indexOf(input.value) >= 0;
         });
@@ -399,6 +440,7 @@
       return Array.prototype.slice.call(document.querySelectorAll("#" + id + " input:checked")).map(function (input) { return input.value; });
     }
     var unit = document.getElementById("f-unit").value;
+    var categoryField = document.getElementById("f-category");
     return {
       product_name: document.getElementById("f-name").value.trim(),
       spec_text: document.getElementById("f-spec").value.trim(),
@@ -407,6 +449,9 @@
       claims: checked("f-claims"),
       allergens_to_avoid: checked("f-allergens"),
       unit_weight_g: unit ? Number(unit) : null,
+      // The number in that field is in the unit the form labelled it with, so the
+      // payload says which one it is.
+      unit: packUnit(categoryField.value),
       images: state.images.slice(),
       plant: {
         name: document.getElementById("p-name").value,
@@ -691,7 +736,7 @@
 
     html.push("<nav class='crumbs small muted' aria-label='Breadcrumb'><a href='#/products'>Products</a> <span>&rsaquo;</span> <span>" + esc(brief.product_name) + "</span></nav>");
     html.push("<div class='card'><div class='card-head'><div><h2>" + esc(brief.product_name) + "</h2>" +
-      "<p class='card-sub'>" + esc(brief.category_label) + " &middot; " + num(brief.unit_weight_g, 0) + " g unit &middot; " + esc(brief.diet) +
+      "<p class='card-sub'>" + esc(brief.category_label) + " &middot; " + num(brief.declared_unit_size || brief.unit_weight_g, 0) + " " + esc(brief.declared_unit || "g") + " unit &middot; " + esc(brief.diet) +
       (brief.claims.length ? " &middot; claims: " + esc(brief.claims.join(", ")) : "") + "</p></div>" +
       "<div class='row'>" +
       "<button data-action='predict'>Re-predict</button>" +

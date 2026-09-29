@@ -62,6 +62,9 @@ def catalog() -> Dict[str, Any]:
             {
                 "id": category_id,
                 "label": category.label,
+                # The unit the pack size is stated in, so the form can label its field
+                # "unit volume (ml)" for a drink and "unit weight (g)" for the rest.
+                "pack_unit": category.pack_unit,
                 "typical_unit_weight_g": category.typical_unit_weight_g,
                 "typical_moisture_pct": list(category.typical_moisture_pct),
                 "typical_aw": list(category.typical_aw),

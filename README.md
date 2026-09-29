@@ -49,6 +49,16 @@ A plain-language next-step banner at the top of every product page says which
 of those actions the record is waiting for. The full guide is
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
 
+The pack size is stated in the unit the product is sold in, not in grams by
+force: a beverage is sized in millilitres and everything else by weight. The
+**New product** form labels its field accordingly (**Unit volume (ml)** for a
+drink, **Unit weight (g)** for the rest), the specification parser carries the
+declared unit out of phrases such as `200 ml bottle` or `1 litre bottle`, and
+the Overview, the process sheet's weights-and-measures limit and the development
+report all print the unit with the size. Millilitres and grams are the same
+number at a density near 1 g/ml - the convention the target maths uses - and the
+nutrition engine applies the real density when it reports per 100 ml.
+
 The interface is responsive down to a 320 px phone: the navigation and the
 product tab strip become single scrollable rows, wide tables scroll inside
 their own card instead of widening the page, the product actions stack full

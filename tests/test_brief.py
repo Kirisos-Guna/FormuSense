@@ -10,7 +10,7 @@ from __future__ import annotations
 import unittest
 
 from app.bootstrap import CASES, INFEASIBLE_CASE
-from app.core import brief as brief_module
+from app.core import brief as brief_module, kb
 
 
 def payload(case, **overrides):
@@ -57,7 +57,8 @@ class SpecParsingTests(unittest.TestCase):
         )
         self.assertEqual(numbers["protein_g"]["value"], 12.0)
         self.assertEqual(numbers["fibre_g"]["value"], 7.0)
-        self.assertEqual(numbers["__unit_weight_g"]["value"], 40.0)
+        self.assertEqual(numbers["__pack_size"]["value"], 40.0)
+        self.assertEqual(numbers["__pack_size"]["unit"], "g")
 
     def test_claim_words_do_not_leak_into_each_other(self) -> None:
         # "reduced sugar" is a reduced_sugar claim; it is not a sugar-free claim.
@@ -119,6 +120,87 @@ class TargetTests(unittest.TestCase):
             {"product_name": "no pack size", "category": "cookie", "spec_text": "A ragi biscuit."}
         )
         self.assertGreater(brief.unit_weight_g, 0)
+
+
+class PackUnitTests(unittest.TestCase):
+    """A pack size is a volume for a drink and a weight for everything else.
+
+    The form used to ask every category for a "unit weight (g)", so a beverage
+    brief had to be converted from millilitres into grams by hand and the number
+    then disagreed with the label printed on the bottle. The unit now travels with
+    the number, from the specification text and the form all the way to the pack.
+    """
+
+    def test_a_pack_declared_in_volume_carries_the_volume_unit(self) -> None:
+        numbers = brief_module.parse_spec_numbers(
+            "High-protein ready-to-drink whey beverage. 200 ml bottle. "
+            "Protein 20 g per bottle (10 g per 100 ml)."
+        )
+        self.assertEqual(numbers["__pack_size"]["value"], 200.0)
+        self.assertEqual(numbers["__pack_size"]["unit"], "ml")
+        # A volume declaration names the measure it is, not a weight.
+        self.assertEqual(numbers["__pack_size"]["evidence"], "declared net volume")
+
+    def test_a_litre_and_a_kilogram_are_converted_to_their_base_unit(self) -> None:
+        litre = brief_module.parse_spec_numbers("A 1 litre bottle of lassi.")
+        litre_l = brief_module.parse_spec_numbers("A 1 L bottle of lassi.")
+        kilogram = brief_module.parse_spec_numbers("A 1 kg pouch of dry mix.")
+        self.assertEqual((litre["__pack_size"]["value"], litre["__pack_size"]["unit"]), (1000.0, "ml"))
+        self.assertEqual((litre_l["__pack_size"]["value"], litre_l["__pack_size"]["unit"]), (1000.0, "ml"))
+        self.assertEqual((kilogram["__pack_size"]["value"], kilogram["__pack_size"]["unit"]), (1000.0, "g"))
+
+    def test_a_net_volume_declaration_is_read(self) -> None:
+        numbers = brief_module.parse_spec_numbers("Net volume 250 ml per can.")
+        self.assertEqual(numbers["__pack_size"]["value"], 250.0)
+        self.assertEqual(numbers["__pack_size"]["unit"], "ml")
+
+    def test_the_pack_the_form_sent_wins_and_keeps_its_unit(self) -> None:
+        brief = brief_module.build_brief(
+            {
+                "product_name": "Whey drink",
+                "category": "beverage",
+                "spec_text": "200 ml bottle.",
+                "unit_weight_g": 330.0,
+                "unit": "ml",
+            }
+        )
+        self.assertEqual(brief.unit_weight_g, 330.0)
+        self.assertEqual(brief.declared_unit, "ml")
+        self.assertEqual(brief.declared_unit_size, 330.0)
+
+    def test_a_unit_the_form_could_not_mean_falls_back_to_the_category(self) -> None:
+        # The field is only ever labelled in grams or millilitres, so anything else
+        # is a client bug: a beverage must not be relabelled by it.
+        brief = brief_module.build_brief(
+            {"product_name": "Drink", "category": "beverage", "unit_weight_g": 250.0, "unit": "kg"}
+        )
+        self.assertEqual(brief.declared_unit, "ml")
+
+    def test_the_category_default_decides_the_unit_when_the_spec_is_silent(self) -> None:
+        drink = brief_module.build_brief({"product_name": "Drink", "category": "beverage"})
+        biscuit = brief_module.build_brief({"product_name": "Biscuit", "category": "cookie"})
+        self.assertEqual(drink.declared_unit, "ml")
+        self.assertEqual(drink.declared_unit_size, kb.category("beverage").typical_unit_weight_g)
+        self.assertEqual(biscuit.declared_unit, "g")
+
+    def test_the_brief_summary_carries_the_declared_unit_for_the_interface(self) -> None:
+        brief = brief_module.build_brief(
+            {"product_name": "Drink", "category": "beverage", "spec_text": "A 200 ml bottle."}
+        )
+        summary = brief_module.summary(brief)
+        self.assertEqual(summary["declared_unit"], "ml")
+        self.assertEqual(summary["declared_unit_size"], 200.0)
+
+    def test_only_the_category_sold_by_volume_declares_millilitres(self) -> None:
+        units = {category_id: card.pack_unit for category_id, card in kb.categories().items()}
+        self.assertEqual(units["beverage"], "ml")
+        self.assertEqual({u for c, u in units.items() if c != "beverage"}, {"g"})
+
+    def test_an_unknown_pack_unit_is_read_as_grams(self) -> None:
+        # A typo in the library must not label a cookie in millilitres.
+        self.assertEqual(kb._pack_unit({"pack_unit": "teaspoons"}), "g")
+        self.assertEqual(kb._pack_unit({}), "g")
+        self.assertEqual(kb._pack_unit({"pack_unit": "ML"}), "ml")
 
 
 if __name__ == "__main__":

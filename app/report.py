@@ -55,7 +55,10 @@ def product_report(view: Dict[str, Any], title: Optional[str] = None) -> str:
     lines.append("")
     lines.append(
         f"*Category: {brief.get('category_label', product.get('category', ''))} | "
-        f"unit weight: {_fmt(brief.get('unit_weight_g'), 1)} g | diet: {brief.get('diet', '')} | "
+        # A drink is declared by volume, so the report says millilitres for it.
+        f"unit {('volume' if (brief.get('declared_unit') or 'g') == 'ml' else 'weight')}: "
+        f"{_fmt(brief.get('declared_unit_size') or brief.get('unit_weight_g'), 1)} "
+        f"{brief.get('declared_unit') or 'g'} | diet: {brief.get('diet', '')} | "
         f"versions: {efficiency.get('versions_used', 0)} | trials: {efficiency.get('trials_used', 0)}*"
     )
     lines.append("")
