@@ -56,29 +56,41 @@ width, and form controls are 16 px so mobile browsers do not zoom on focus.
 The rules that fixed each measured overflow are locked in by `tests/test_ui.py`,
 which runs without a browser.
 
-## The project page
+## Live demo
 
-The application is a Python server, so a static host can publish the project page
-and the deck, not the running agent. Both are built from this repository:
+The application is a Python server, so it needs a host that runs processes - a
+static host can only publish files. The deployed instance is this repository,
+built by the `Dockerfile` and described by `render.yaml`:
 
-* Project page: <https://kirisos-guna.github.io/FormuSense/>
-* Slide deck: <https://kirisos-guna.github.io/FormuSense/slides.html>
+### <https://formusense.onrender.com>
 
-`.github/workflows/pages.yml` assembles them from `docs/index.html` and the
-generated deck on every push to `main`. **Pages has to be switched on once, by
-hand** - Settings, Pages, Build and deployment, Source: *GitHub Actions* - because
-creating a Pages site needs repository administration rights that the workflow's
-`GITHUB_TOKEN` does not have. Until that is done the workflow stops at
-`actions/configure-pages` and the address above answers 404; re-running the
-workflow after the switch publishes it.
+* It is a free Render instance, so it sleeps after fifteen minutes without a
+  visitor and the first request after that takes about a minute to wake. A
+  scheduled workflow, `.github/workflows/keepalive.yml`, pings it every ten
+  minutes so that a judge does not meet that wait.
+* It runs exactly this code, on the bundled SQLite record, seeded with the
+  demonstration cases before the port opens (`FORMUSENSE_SEED_ON_START`), with the
+  acceptance model trained from the dataset during the image build. Nothing is
+  fetched from a third party at runtime and no API key exists anywhere in it.
+* Reads and writes are open, so the app can actually be used: create a product,
+  run a trial, plan the next version, read the ledger. The record is recreated
+  whenever Render recycles the instance, which is why the boot seed exists.
+* A free instance has a fraction of one CPU, so the closed loop, the benchmark and
+  report generation are slower up there than on your own machine.
 
-While Pages is off, the same page renders straight from the repository through
-[raw.githack](https://raw.githack.com/Kirisos-Guna/FormuSense/main/docs/index.html),
-which needs no setting at all: it is a mirror of the file, not a deployment.
+To stand up the same shape yourself, press this button and pick the repository:
 
-The real thing is not on a host: install nothing and run `python run.py --open`.
-The agent, its database and its interface all run locally, and nothing on the
-project page depends on that server.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Kirisos-Guna/FormuSense)
+
+Or run it locally, which needs nothing installed beyond Python:
+
+```
+python run.py --open          # the interface at http://127.0.0.1:8770
+```
+
+The slide deck is generated from the project record and lives in the repository as
+[`report/Technostatic_Wings_FormuSense_Slides.html`](report/Technostatic_Wings_FormuSense_Slides.html)
+(the `.pptx` beside it is the same deck for PowerPoint).
 
 ## The database
 
@@ -204,7 +216,9 @@ app/config.py           environment-driven settings
 app/logging_setup.py    process logging and request ids
 app/data/               ingredients.json, processes.json, limits.json, dri_profiles.json, formusense.db, figures
 app/db/                 dialect adapter (backend.py) and versioned migrations/{sqlite,postgres}
-Dockerfile              app image; requirements-optional.txt lists the optional extras
+Dockerfile              app image; trains the model, then serves; .dockerignore keeps it lean
+render.yaml             the Render blueprint: one free Docker web service, health-checked
+.github/workflows/      CI (both dialects), plus the keep-alive ping for the live demo
 app/plant.py            the simulated plant
 app/store.py            the record layer: products, versions, trials, evidence, plans
 app/service.py          the agent: one method per stage of the loop

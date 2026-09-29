@@ -190,34 +190,60 @@ def seed_all(force: bool = False) -> Dict[str, Any]:
     from .service import AgentService
 
     service = AgentService(Store())
-    if force:
-        for product in service.store.products():
-            if product["name"] in {case["name"] for case in case_definitions(True)}:
-                service.store.clear(int(product["id"]))
-    created: List[Dict[str, Any]] = []
-    for case in case_definitions():
-        payload = {
-            "product_name": case["name"],
-            "category": case["category"],
-            "spec_text": case["spec_text"],
-            "diet": case["diet"],
-            "claims": case["claims"],
-            "unit_weight_g": case["unit_weight_g"],
-            "plant": case["plant"],
-        }
-        result = service.create_product(payload)
-        created.append(
-            {
-                "key": case["key"],
-                "product_id": result["product_id"],
-                "objective": result["evaluation"]["objective"],
-                "conflicts": len(result["conflicts"]),
+    try:
+        if force:
+            for product in service.store.products():
+                if product["name"] in {case["name"] for case in case_definitions(True)}:
+                    service.store.clear(int(product["id"]))
+        created: List[Dict[str, Any]] = []
+        for case in case_definitions():
+            payload = {
+                "product_name": case["name"],
+                "category": case["category"],
+                "spec_text": case["spec_text"],
+                "diet": case["diet"],
+                "claims": case["claims"],
+                "unit_weight_g": case["unit_weight_g"],
+                "plant": case["plant"],
             }
-        )
-        service.store.log(
-            result["product_id"],
-            "bootstrap",
-            f"Seeded case study: {case['plant_narrative']}",
-            {"plant": case["plant"]},
-        )
+            result = service.create_product(payload)
+            created.append(
+                {
+                    "key": case["key"],
+                    "product_id": result["product_id"],
+                    "objective": result["evaluation"]["objective"],
+                    "conflicts": len(result["conflicts"]),
+                }
+            )
+            service.store.log(
+                result["product_id"],
+                "bootstrap",
+                f"Seeded case study: {case['plant_narrative']}",
+                {"plant": case["plant"]},
+            )
+    finally:
+        # The connection this opened goes back here. The boot seed runs on every
+        # container start, and a leaked connection per start is a leak nobody would
+        # notice until it mattered.
+        service.store.close()
     return {"products": len(created), "cases": created}
+
+
+def ensure_seeded() -> Dict[str, Any]:
+    """Seed the demonstration cases if - and only if - the record is empty.
+
+    A container that has just been built has an empty database, and a visitor should
+    not be the one who finds that out. Nothing is written when products are already
+    on record, which makes this safe to call on every boot; the launcher only calls
+    it when ``FORMUSENSE_SEED_ON_START`` is set, so a developer's local run never
+    touches a record somebody is working in.
+    """
+    store = Store()
+    try:
+        existing = len(store.products())
+    finally:
+        store.close()
+    if existing:
+        return {"seeded": False, "products": existing}
+    seeded = seed_all(force=False)
+    return {"seeded": True, "products": seeded["products"]}

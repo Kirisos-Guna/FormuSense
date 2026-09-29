@@ -22,6 +22,31 @@ def _env(name: str, default: str = "") -> str:
     return str(os.environ.get(name, default) or "").strip()
 
 
+def _port() -> int:
+    """The port to serve on.
+
+    ``FORMUSENSE_PORT`` is the project's own setting; ``PORT`` is what a hosting
+    platform injects (Render, and most of its neighbours). The project's variable
+    wins when both are set, so a container can be pointed somewhere deliberately,
+    and the platform's is followed when it is the only one - which is the case on a
+    deployment, where nobody types a port at all.
+
+    The two are not read with the same tolerance. A typo in our own variable raises,
+    because somebody meant to say something; a ``PORT`` that is not a usable port is
+    ignored, because shells and tooling export things like ``PORT=0`` by habit and
+    following that would move the interface to a port the kernel picks, where nobody
+    would find it.
+    """
+    own = _env("FORMUSENSE_PORT")
+    if own:
+        return int(own)
+    try:
+        platform = int(_env("PORT"))
+    except ValueError:
+        return 8770
+    return platform if 0 < platform < 65536 else 8770
+
+
 @dataclass(frozen=True)
 class Settings:
     db_url: str
@@ -63,7 +88,7 @@ def settings(overrides: Optional[Dict[str, object]] = None) -> Settings:
     values = {
         "db_url": _env("FORMUSENSE_DB_URL", DEFAULT_DB_URL),
         "host": _env("FORMUSENSE_HOST", "127.0.0.1"),
-        "port": int(_env("FORMUSENSE_PORT", "8770") or 8770),
+        "port": _port(),
         "auth_token": _env("FORMUSENSE_AUTH_TOKEN"),
         "log_level": _env("FORMUSENSE_LOG_LEVEL", "INFO").upper(),
         "log_requests": _env("FORMUSENSE_LOG_REQUESTS", "1") not in ("0", "false", "False"),

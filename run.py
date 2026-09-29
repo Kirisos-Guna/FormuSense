@@ -19,6 +19,7 @@ Runs on the Python standard library only::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -26,13 +27,43 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-DEFAULT_PORT = 8770
+
+def seeds_on_start() -> bool:
+    """Whether to seed the demonstration cases before serving.
+
+    Off unless ``FORMUSENSE_SEED_ON_START`` is set: a local run must never rewrite
+    the record somebody is working in. A deployment sets it, because a fresh
+    container starts with an empty database, and the first visitor should not be
+    the one who discovers that.
+    """
+    value = os.environ.get("FORMUSENSE_SEED_ON_START", "").strip().lower()
+    return value not in ("", "0", "false", "no", "off")
 
 
-def main() -> int:
+def bootstrap_on_start() -> str:
+    """Seed the record if the deployment asked for it, and describe what happened."""
+    from app.bootstrap import ensure_seeded
+
+    result = ensure_seeded()
+    if result["seeded"]:
+        return f"empty, seeded {result['products']} demonstration products"
+    return f"{result['products']} demonstration products already on record"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The command line.
+
+    ``--host`` and ``--port`` default to the settings rather than to constants, so
+    the interface a hosting platform asks for is followed without the container
+    having to pass flags (``PORT``, see ``app/config.py``). An explicit flag still
+    wins, which keeps every local invocation exactly as it was.
+    """
+    from app.config import settings
+
+    current = settings()
     parser = argparse.ArgumentParser(description="Food Product Development Agent")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--host", default=current.host)
+    parser.add_argument("--port", type=int, default=current.port)
     parser.add_argument("--open", action="store_true", help="open the UI in a browser")
     parser.add_argument(
         "--seed",
@@ -106,7 +137,11 @@ def main() -> int:
         action="store_true",
         help="apply pending database migrations and report the schema status, then exit",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     if args.db_migrate:
         from app.db.migrate import migration_status
@@ -220,12 +255,18 @@ def main() -> int:
 
     from app.server import serve
 
+    # Seeding happens before the port is opened, so a visitor never catches the
+    # application halfway through populating itself.
+    seeded = bootstrap_on_start() if seeds_on_start() else None
+
     url = f"http://{args.host}:{args.port}/"
     print("=" * 68)
     print("  AI-Powered Food Product Development Agent  (PS-1 | Tiny Dot Foods)")
     print("=" * 68)
     print(f"  UI      : {url}")
     print("  API     : " + url + "api/health")
+    if seeded is not None:
+        print(f"  Record  : {seeded}")
     print("  Stop    : Ctrl+C")
     print("=" * 68)
     if args.open:

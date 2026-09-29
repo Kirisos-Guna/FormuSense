@@ -1,0 +1,19 @@
+# The image is built from the source tree, not from whatever a working copy happens
+# to contain: the local record, the locally built dataset and model (the build step
+# regenerates them) and the developer's own tool state stay out.
+.git
+.gitignore
+.freebuff
+.github
+__pycache__/
+*.py[cod]
+.env
+config.local.json
+formusense.log
+formusense-web.out
+*.db
+*.db-shm
+*.db-wal
+app/data/figures/
+app/data/datasets/
+app/data/models/

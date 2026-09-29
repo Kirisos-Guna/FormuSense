@@ -1,0 +1,31 @@
+# Render blueprint: https://render.com/docs/blueprint-spec
+#
+# One free Docker web service, built from this repository. To use it: sign in to
+# Render with GitHub, choose New, Blueprint, pick this repository, and apply. The
+# name below decides the address, which is the one the README and the keep-alive
+# workflow quote: https://formusense.onrender.com
+#
+# The service runs the bundled SQLite record, not a database service: the record is
+# seeded on boot (see FORMUSENSE_SEED_ON_START) and Render's free disk is
+# ephemeral, so there is nothing to keep alive but the application itself.
+services:
+  - type: web
+    name: formusense
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/ready
+    autoDeploy: true
+    # Render defaults to its first region. Add `region: singapore` here and re-apply
+    # to move the instance closer to India, if your plan offers that region.
+    envVars:
+      # The container has to answer on the interface Render's proxy reaches.
+      - key: FORMUSENSE_HOST
+        value: 0.0.0.0
+      # A fresh container starts with an empty record; seed the demonstration cases
+      # before the port opens, so the first visitor finds a populated application.
+      - key: FORMUSENSE_SEED_ON_START
+        value: "1"
+      - key: FORMUSENSE_LOG_LEVEL
+        value: INFO

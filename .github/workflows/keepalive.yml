@@ -1,0 +1,55 @@
+name: Keep the live demo awake
+
+# Render's free plan spins a web service down after fifteen minutes without traffic,
+# and the next visitor pays about a minute of cold start. This knocks on the door
+# every ten minutes so a judge does not. It is a convenience, not a guarantee:
+# scheduled runs are sometimes delayed, and GitHub pauses schedules in a repository
+# that has seen no activity for sixty days. Neither case breaks anything - the app
+# simply wakes on the next visit.
+#
+# APP_URL must stay the address the README quotes, including any suffix Render adds
+# if the name in render.yaml was already taken.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_URL: https://formusense.onrender.com
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the application whether it is up
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o health.json -w '%{http_code}' --max-time 90 "$APP_URL/api/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "awake after attempt $attempt: $(head -c 400 health.json)"
+              {
+                echo "### Live demo is awake"
+                echo
+                echo "\`$APP_URL/api/health\` answered 200 on attempt $attempt."
+                echo
+                echo '```json'
+                head -c 600 health.json
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code - waiting 30s in case this is a cold start"
+            sleep 30
+          done
+          {
+            echo "### Live demo did not answer"
+            echo
+            echo "\`$APP_URL/api/health\` never returned 200. A judge would see a cold or broken app."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::$APP_URL did not answer 200 on /api/health"
+          exit 1
