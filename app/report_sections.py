@@ -571,7 +571,24 @@ def _chapter_3(context: Dict[str, Any]) -> List[Dict[str, Any]]:
             "texture from local contrast - and, if an API key is configured, a vision model adds "
             "the semantic layer (what the product is, what the surface finish looks like). The "
             "offline path always runs, so a machine with no network and no key still produces a "
-            "complete brief; the API is an enrichment, never a dependency."
+            "complete brief; the model is an enrichment, never a dependency."
+        ),
+        _p(
+            "Three optional surfaces use a model, each through one provider-agnostic client whose "
+            "network call is a parameter rather than a global. That client speaks the OpenAI "
+            "chat-completions shape, so one credential against an OpenAI-compatible gateway "
+            "reaches every vendor behind it, and an OpenAI or Gemini key is honoured through the "
+            "same code path. First, the photograph description above. Second, a review of the specification "
+            "text against what the rule-based parser already extracted, which can name a claim or "
+            "an allergen only from the registries the system already holds and can otherwise only "
+            "raise questions: its findings are appended to the brief's open questions and to "
+            "nothing else, so the numbers in this report remain exactly the ones the parser "
+            "computed. Third, a read-only question-and-answer surface over the product's own "
+            "record, which answers from a bounded extract of the stored brief, formulation, "
+            "prediction, trials and plan and names the parts it used. The model is asked only when "
+            "a run asks for it, at most a configured number of images, with a bounded reply length, "
+            "a timeout and an hourly ceiling; every reply is stored against a hash of the request, "
+            "so repeating a question costs nothing and returns the same words."
         ),
         _h2("3.2  Designing an initial formulation"),
         _p(
@@ -898,7 +915,12 @@ def _chapter_4(context: Dict[str, Any]) -> List[Dict[str, Any]]:
                 ["Web browser (Chrome / Edge / Firefox)", environment.get("browser", ""), "The single-page interface, served from the application itself"],
                 ["Pillow", environment.get("pillow", ""), "Reading uploaded product images and drawing the report figures"],
                 ["Pygments", environment.get("pygments", ""), "Syntax-highlighted code listings for this report"],
-                ["Optional vision API key (OpenAI or Gemini)", "not configured", "Adds a semantic description of the product photographs"],
+                [
+                    "Optional model API key (an OpenAI-compatible endpoint; OpenAI or Gemini also honoured)",
+                    environment.get("ai_provider", "not configured")
+                    + (": " + environment.get("ai_model", "") if environment.get("ai_model", "-") != "-" else ""),
+                    environment.get("ai_note", "Adds a semantic description of the photographs, a specification review and questions answered from the record"),
+                ],
             ],
             caption="Table 4.2  Software requirements",
             widths=[0.55, 0.45, 1.1],
@@ -1221,6 +1243,11 @@ def _chapter_8(context: Dict[str, Any]) -> List[Dict[str, Any]]:
                 ["Python", context["environment"].get("python", ""), "Language and runtime for the whole application"],
                 ["SQLite", context["environment"].get("sqlite", ""), "The development record"],
                 ["Pillow", context["environment"].get("pillow", ""), "Image measurement and figure rendering"],
+                [
+                    "Optional model API key",
+                    context["environment"].get("ai_provider", "not configured"),
+                    "Photograph description, specification review, and questions about the record",
+                ],
                 ["Pygments", context["environment"].get("pygments", ""), "Syntax highlighting in the code listings"],
                 ["Git", context["environment"].get("git", ""), "Version control of the source"],
             ],

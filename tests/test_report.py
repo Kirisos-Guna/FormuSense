@@ -8,13 +8,33 @@ listing is trimmed visibly rather than silently.
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 from xml.dom.minidom import parseString
 
 from app import report_sections, report_writers
+
+KEY = {"OPENROUTER_API_KEY": "sk-or-test-abcdefghij"}
+
+
+def _text(value) -> str:
+    """Every string inside a report, whatever shape the block happens to be.
+
+    A report is a nested structure of ``text``, ``rows``, ``lines`` and ``cells``, so
+    a check that has to see all of the prose cannot assume one block layout: it walks
+    the structure instead.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_text(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return " ".join(_text(item) for item in value)
+    return ""
 
 
 def _synthetic_context() -> dict:
@@ -227,6 +247,43 @@ class GenerateTests(unittest.TestCase):
                 self.assertGreater(result["blocks"], 100)
         finally:
             store.close()
+
+
+class VendorNeutralityTests(unittest.TestCase):
+    """The deliverable describes the model layer without naming the platform.
+
+    The platform is named where a reader who wants it looks: the code, the environment
+    variables and the deployment configuration. The report is a submitted document, so
+    it describes the endpoint by what it is and still prints the models that would
+    answer, because those are the part of the claim somebody can check.
+    """
+
+    def test_the_environment_row_describes_the_endpoint_not_the_platform(self) -> None:
+        with mock.patch.dict(os.environ, dict(KEY), clear=True):
+            environment = report_writers._ai_environment()
+        self.assertNotIn("openrouter", _text(environment).lower())
+        self.assertEqual(environment["ai_provider"], "OpenAI-compatible gateway")
+        # The models stay: a table that named no model would be an appendix nobody
+        # could check anything against.
+        self.assertNotEqual(environment["ai_model"], "-")
+        self.assertIn("/", environment["ai_model"])
+
+    def test_no_chapter_names_the_platform(self) -> None:
+        context = _synthetic_context()
+        with mock.patch.dict(os.environ, dict(KEY), clear=True):
+            context["environment"] = {**context["environment"], **report_writers._ai_environment()}
+        built = _text(report_sections.build(context)).lower()
+        self.assertNotIn("openrouter", built)
+        self.assertIn("openai-compatible", built)
+        self.assertIn(context["environment"]["ai_model"].lower(), built)
+
+    def test_without_a_key_the_report_says_offline_rather_than_a_vendor(self) -> None:
+        for name in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+            with self.subTest(name=name):
+                with mock.patch.dict(os.environ, {name: ""}, clear=True):
+                    environment = report_writers._ai_environment()
+                self.assertEqual(environment["ai_provider"], "not configured")
+                self.assertEqual(environment["ai_model"], "-")
 
 
 if __name__ == "__main__":  # pragma: no cover

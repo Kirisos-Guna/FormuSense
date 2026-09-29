@@ -249,6 +249,34 @@ def _run_tests() -> str:
     return "\n".join(lines)
 
 
+def _ai_environment() -> Dict[str, str]:
+    """What the optional model layer would use, for the report's environment table.
+
+    Reported, never depended on. The report has to build on a machine with no key, so
+    it prints what is configured rather than requiring anything: an appendix that says
+    which model described the photographs is the difference between a claim somebody
+    can check and one they cannot.
+    """
+    from .config import ai_settings
+
+    config = ai_settings()
+    if not config.configured:
+        return {
+            "ai_provider": "not configured",
+            "ai_model": "-",
+            "ai_note": "Offline mode: local image measurement and rule-based parsing only",
+        }
+    return {
+        # The platform is named in the code and in the deployment configuration, not in
+        # the document: the appendix owes the reader the models that would answer, since
+        # those are what make the enrichment checkable, and the endpoint they share is
+        # described by what it is rather than by whose it is.
+        "ai_provider": "OpenAI-compatible gateway",
+        "ai_model": ", ".join(config.model_chain(config.provider)),
+        "ai_note": "Optional enrichment; the offline layers remain the only source of numbers",
+    }
+
+
 def gather_environment() -> Dict[str, str]:
     from .core import kb
 
@@ -270,6 +298,7 @@ def gather_environment() -> Dict[str, str]:
         "processes_size": _file_size(ROOT / "app" / "data" / "processes.json"),
         "limits_size": _file_size(ROOT / "app" / "data" / "limits.json"),
         "categories_defined": len(summary.get("categories") or []),
+        **_ai_environment(),
     }
 
 
