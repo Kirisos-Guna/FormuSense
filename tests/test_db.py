@@ -101,6 +101,49 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("FormuSense initial schema", joined)
         self.assertGreaterEqual(len(statements), 9)
 
+    def test_the_inserted_id_is_attached_to_a_cursor_of_our_own(self) -> None:
+        # Regression: the id used to be assigned onto the driver's cursor, but
+        # psycopg's cursor declares __slots__ = () and refuses the attribute. Inside
+        # the probe's try block that AttributeError was swallowed, so app/store.py
+        # then failed on `int(cursor.lastrowid)` - on PostgreSQL only, which is why
+        # the local suite stayed green while CI went red.
+        conn = _postgres_connection([{"lastval": 7}])
+        cursor = conn.execute("INSERT INTO products (name) VALUES (?)", ("pg test",))
+        self.assertIsInstance(cursor, backend.Cursor)
+        self.assertEqual(cursor.lastrowid, 7)
+
+    def test_a_postgres_insert_still_asks_the_sequence_for_the_id(self) -> None:
+        conn = _postgres_connection([{"lastval": 3}])
+        conn.execute("INSERT INTO products (name) VALUES (?)", ("pg test",))
+        self.assertEqual(
+            [sql for sql, _ in conn.conn.cursors[0].executed],
+            ["INSERT INTO products (name) VALUES (%s)", "SELECT LASTVAL()"],
+        )
+
+    def test_a_plain_read_is_not_probed_for_a_lastrowid(self) -> None:
+        conn = _postgres_connection([{"id": 1}])
+        cursor = conn.execute("SELECT id FROM products WHERE id=?", (1,))
+        self.assertEqual(
+            [sql for sql, _ in conn.conn.cursors[0].executed], ["SELECT id FROM products WHERE id=%s"]
+        )
+        self.assertIsNone(cursor.lastrowid)
+
+    def test_the_cursor_wrapper_forwards_to_the_driver_cursor(self) -> None:
+        conn = _postgres_connection([{"id": 1}])
+        cursor = conn.execute("SELECT id FROM products WHERE id=?", (1,))
+        self.assertEqual(cursor.fetchone(), {"id": 1})
+        self.assertEqual(cursor.fetchall(), [])
+        self.assertEqual(cursor.rowcount, -1)
+        self.assertEqual(list(cursor), [])
+        cursor.close()
+
+    def test_the_driver_cursor_really_cannot_hold_a_lastrowid(self) -> None:
+        # While this raises, attaching the id anywhere but on our own cursor loses
+        # it; if a future psycopg allows the attribute, the wrapper is redundant
+        # rather than wrong, and this test is the note explaining why.
+        with self.assertRaises(AttributeError):
+            _SlottedCursor([]).lastrowid = 1
+
     def test_postgres_translation_leaves_plain_reads_alone(self) -> None:
         translated = PostgresConnection._translate("SELECT * FROM products WHERE id=?")
         self.assertEqual(translated, "SELECT * FROM products WHERE id=%s")
@@ -109,6 +152,64 @@ class BackendTests(unittest.TestCase):
         available, detail = backend.driver_available("sqlite:///anything.db")
         self.assertTrue(available)
         self.assertIn("sqlite", detail.lower())
+
+
+class _SlottedCursor:
+    """A stand-in for psycopg's cursor, which has no instance dictionary.
+
+    The empty ``__slots__`` is the whole point: it makes ``cursor.lastrowid = id``
+    raise, exactly as it does on the real driver, so the tests below fail if the
+    shim ever goes back to attaching the id to the driver's own cursor.
+    """
+
+    __slots__ = ("executed", "_rows")
+
+    def __init__(self, rows: list) -> None:
+        self.executed: list = []
+        self._rows = list(rows)
+
+    def execute(self, sql: str, params: object = None) -> "_SlottedCursor":
+        self.executed.append((sql, params))
+        return self
+
+    def fetchone(self) -> object:
+        return self._rows.pop(0) if self._rows else None
+
+    def fetchall(self) -> list:
+        rows, self._rows = self._rows, []
+        return rows
+
+    def close(self) -> None:
+        pass
+
+    def __iter__(self) -> object:
+        # Iterating consumes the result set, as it does on the driver's cursor.
+        while self._rows:
+            yield self._rows.pop(0)
+
+    @property
+    def rowcount(self) -> int:
+        return -1
+
+
+class _FakeConnection:
+    """Just enough of a psycopg connection to reach PostgresConnection.execute."""
+
+    def __init__(self, rows: list) -> None:
+        self.rows = rows
+        self.cursors: list = []
+
+    def cursor(self) -> _SlottedCursor:
+        cursor = _SlottedCursor(self.rows)
+        self.cursors.append(cursor)
+        return cursor
+
+
+def _postgres_connection(rows: list) -> PostgresConnection:
+    # The constructor would need a server; the execute path does not.
+    conn = object.__new__(PostgresConnection)
+    conn.conn = _FakeConnection(rows)
+    return conn
 
 
 class MigrationTests(unittest.TestCase):

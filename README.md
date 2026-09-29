@@ -56,6 +56,30 @@ width, and form controls are 16 px so mobile browsers do not zoom on focus.
 The rules that fixed each measured overflow are locked in by `tests/test_ui.py`,
 which runs without a browser.
 
+## The project page
+
+The application is a Python server, so a static host can publish the project page
+and the deck, not the running agent. Both are built from this repository:
+
+* Project page: <https://kirisos-guna.github.io/FormuSense/>
+* Slide deck: <https://kirisos-guna.github.io/FormuSense/slides.html>
+
+`.github/workflows/pages.yml` assembles them from `docs/index.html` and the
+generated deck on every push to `main`. **Pages has to be switched on once, by
+hand** - Settings, Pages, Build and deployment, Source: *GitHub Actions* - because
+creating a Pages site needs repository administration rights that the workflow's
+`GITHUB_TOKEN` does not have. Until that is done the workflow stops at
+`actions/configure-pages` and the address above answers 404; re-running the
+workflow after the switch publishes it.
+
+While Pages is off, the same page renders straight from the repository through
+[raw.githack](https://raw.githack.com/Kirisos-Guna/FormuSense/main/docs/index.html),
+which needs no setting at all: it is a mirror of the file, not a deployment.
+
+The real thing is not on a host: install nothing and run `python run.py --open`.
+The agent, its database and its interface all run locally, and nothing on the
+project page depends on that server.
+
 ## The database
 
 One SQLite file is the default, and nothing needs installing to use it. The same
@@ -176,14 +200,13 @@ Speaker notes are not embedded; the deck is content-complete without them.
 run.py                  launcher: server, seed, benchmark, report, slides
 app/core/               knowledge base, models, generation, optimisation, diagnosis, planning, population guidance
 app/ml/                 dataset, features, models, evaluation and the trained-model registry (offline)
-app/db/                 dialect adapter (SQLite / PostgreSQL) and versioned migrations
 app/config.py           environment-driven settings
 app/logging_setup.py    process logging and request ids
 app/data/               ingredients.json, processes.json, limits.json, dri_profiles.json, formusense.db, figures
 app/db/                 dialect adapter (backend.py) and versioned migrations/{sqlite,postgres}
 Dockerfile              app image; requirements-optional.txt lists the optional extras
 app/plant.py            the simulated plant
-app/store.py            the SQLite record
+app/store.py            the record layer: products, versions, trials, evidence, plans
 app/service.py          the agent: one method per stage of the loop
 app/bootstrap.py        the seeded demonstration cases and their plant faults
 app/benchmark.py        agent loop vs one-factor-at-a-time

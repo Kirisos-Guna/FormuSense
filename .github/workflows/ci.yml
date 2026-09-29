@@ -102,3 +102,12 @@ jobs:
           store.close()
           PY
           python -m unittest tests.test_db -v
+
+      - name: Run the seeded loop on PostgreSQL
+        # The round trip above touches three tables. The seed drives every insert the
+        # record layer has - the formulation upsert, predictions, trials, analyses,
+        # diagnoses, plans, the ledger and benchmarks - against the real server, so a
+        # dialect difference in any of them fails here instead of in a deployment.
+        env:
+          FORMUSENSE_DB_URL: postgresql://formu:formu@localhost:5432/formusense
+        run: python run.py --seed

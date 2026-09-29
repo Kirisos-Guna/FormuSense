@@ -3,7 +3,7 @@
 Both expose the same four calls the record layer uses, so :mod:`app.store` does
 not care which one it is on:
 
-    conn.execute(sql, params)      # returns a cursor with .fetchone/.fetchall/.lastrowid
+    conn.execute(sql, params)      # returns a .Cursor: .fetchone/.fetchall/.lastrowid
     conn.executescript(sql)        # several statements, used for schema files
     conn.commit() / conn.close()
     conn.dialect                   # "sqlite" or "postgres"
@@ -21,7 +21,11 @@ stays reviewable:
 * ``lastrowid``, which PostgreSQL does not populate, so the id is read back with
   ``SELECT LASTVAL()`` immediately after an insert - but only for the tables that
   own a sequence, because ``LASTVAL()`` raises otherwise and a raised statement
-  aborts the transaction it runs in.
+  aborts the transaction it runs in;
+* the cursor object itself, which is wrapped in :class:`Cursor` so that it carries
+  a ``lastrowid``. psycopg's cursor declares ``__slots__ = ()`` and so has no
+  instance dictionary, which means the id cannot be attached to the driver's own
+  cursor object at all.
 """
 from __future__ import annotations
 
@@ -64,6 +68,66 @@ def _needs_lastval(statement: str) -> bool:
         return False
     match = INSERT_TABLE.match(statement)
     return bool(match) and match.group(1).lower() in SEQUENCED_TABLES
+
+
+class Cursor:
+    """The cursor the record layer gets back: a driver cursor plus ``lastrowid``.
+
+    The driver's cursor is deliberately not returned. Both backends have to answer
+    ``cursor.lastrowid`` after an insert, and psycopg's cursor cannot hold that
+    attribute: ``Cursor`` declares ``__slots__ = ()``, so assigning to it raises
+    ``AttributeError`` and the id of the row just inserted is lost - quietly, when
+    the assignment sits inside a probe that is allowed to fail. Everything else is
+    forwarded to the driver's cursor, which still owns the result set.
+    """
+
+    __slots__ = ("_cursor", "lastrowid")
+
+    def __init__(self, cursor: Any, lastrowid: Optional[int] = None) -> None:
+        self._cursor = cursor
+        self.lastrowid = lastrowid
+
+    def fetchone(self) -> Any:
+        return self._cursor.fetchone()
+
+    def fetchall(self) -> Any:
+        return self._cursor.fetchall()
+
+    def fetchmany(self, size: Optional[int] = None) -> Any:
+        return self._cursor.fetchmany() if size is None else self._cursor.fetchmany(size)
+
+    def close(self) -> None:
+        self._cursor.close()
+
+    def __iter__(self) -> Any:
+        return iter(self._cursor)
+
+    def __getattr__(self, name: str) -> Any:
+        # Reached only for names this wrapper does not define itself, so everything
+        # else the driver cursor exposes (rowcount, description, ...) keeps working.
+        if name == "_cursor":
+            raise AttributeError(name)
+        return getattr(self._cursor, name)
+
+
+def _read_lastval(cursor: Any) -> Optional[int]:
+    """The id of the row just inserted, asked of the sequence that produced it.
+
+    ``LASTVAL()`` returns the value most recently produced by a sequence in this
+    session, which straight after an insert into a ``SERIAL`` column is the id the
+    caller wants. Only ever called for a table in :data:`SEQUENCED_TABLES`, because
+    on any other table it raises and a raised statement aborts its transaction.
+    """
+    cursor.execute("SELECT LASTVAL()")
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return int(next(iter(row.values())))
+    if isinstance(row, (list, tuple)):
+        return int(row[0])
+    return int(row)
+
 
 POSTGRES_DRIVER_HINT = (
     "PostgreSQL support needs a driver. Install one with:\n"
@@ -157,20 +221,10 @@ class PostgresConnection(Connection):
         statement = self._translate(sql)
         cursor = self.conn.cursor()
         cursor.execute(statement, tuple(params or ()))
-        if _needs_lastval(statement):
-            # psycopg does not populate lastrowid; LASTVAL() returns the value most
-            # recently produced by a sequence in this session, which is exactly the
-            # id the caller wants straight after an insert into a SERIAL column.
-            try:
-                probe = self.conn.cursor()
-                probe.execute("SELECT LASTVAL()")
-                row = probe.fetchone()
-                probe.close()
-                if row is not None:
-                    cursor.lastrowid = next(iter(row.values())) if isinstance(row, dict) else row[0]
-            except Exception:  # pragma: no cover - table without a sequence
-                pass
-        return cursor
+        # The id is read back on the same cursor rather than on a second one: the
+        # caller of an insert never reads the insert's own result set.
+        lastrowid = _read_lastval(cursor) if _needs_lastval(statement) else None
+        return Cursor(cursor, lastrowid)
 
     def executescript(self, sql: str) -> None:
         cursor = self.conn.cursor()
