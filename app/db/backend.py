@@ -1,0 +1,195 @@
+"""Connection backends: SQLite (standard library) and PostgreSQL (optional driver).
+
+Both expose the same four calls the record layer uses, so :mod:`app.store` does
+not care which one it is on:
+
+    conn.execute(sql, params)      # returns a cursor with .fetchone/.fetchall/.lastrowid
+    conn.executescript(sql)        # several statements, used for schema files
+    conn.commit() / conn.close()
+    conn.dialect                   # "sqlite" or "postgres"
+
+The PostgreSQL backend imports its driver lazily. If the driver is not installed
+the import error is turned into a readable instruction rather than a traceback at
+startup, and the SQLite path is completely unaffected.
+
+Three SQL differences are handled explicitly, and only these three, so the shim
+stays reviewable:
+
+* placeholder style: ``?`` (SQLite) versus ``%s`` (PostgreSQL);
+* ``INSERT OR REPLACE`` on the versioned formulation table, which becomes
+  ``INSERT ... ON CONFLICT (product_id, version) DO UPDATE``;
+* ``lastrowid``, which PostgreSQL does not populate, so the id is read back with
+  ``SELECT LASTVAL()`` immediately after an insert.
+"""
+from __future__ import annotations
+
+import re
+import sqlite3
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+INSERT_OR_REPLACE = re.compile(r"^\s*INSERT\s+OR\s+REPLACE\s+INTO\s+formulations", re.IGNORECASE)
+INSERT_STATEMENT = re.compile(r"^\s*INSERT\s+INTO", re.IGNORECASE)
+
+POSTGRES_DRIVER_HINT = (
+    "PostgreSQL support needs a driver. Install one with:\n"
+    "    pip install \"psycopg[binary]\"\n"
+    "or run without FORMUSENSE_DB_URL to use the bundled SQLite database."
+)
+
+
+class Connection:
+    """The common surface both backends implement."""
+
+    dialect = "sqlite"
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:  # pragma: no cover
+        raise NotImplementedError
+
+    def executescript(self, sql: str) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+    def commit(self) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+    def close(self) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+
+class SqliteConnection(Connection):
+    dialect = "sqlite"
+
+    def __init__(self, path: Optional[Path] = None) -> None:
+        if path is not None:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(str(path), check_same_thread=False)
+        else:
+            self.conn = sqlite3.connect(":memory:", check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        # The HTTP server is threaded and opens one store per request, so two
+        # requests can want the write lock at the same moment. Write-ahead logging
+        # plus a busy timeout turns that from an exception into a wait.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
+        return self.conn.execute(sql, tuple(params or ()))
+
+    def executescript(self, sql: str) -> None:
+        self.conn.executescript(sql)
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
+
+
+class PostgresConnection(Connection):
+    dialect = "postgres"
+
+    def __init__(self, url: str) -> None:
+        try:
+            import psycopg  # type: ignore
+            from psycopg.rows import dict_row  # type: ignore
+        except ImportError as exc:  # pragma: no cover - depends on environment
+            raise RuntimeError(POSTGRES_DRIVER_HINT) from exc
+        self._psycopg = psycopg
+        self.conn = psycopg.connect(url, row_factory=dict_row, autocommit=False)
+
+    # ------------------------------------------------------------ translation #
+    @staticmethod
+    def _translate(sql: str) -> str:
+        if INSERT_OR_REPLACE.match(sql):
+            # The only INSERT OR REPLACE in the schema is the formulation upsert,
+            # which is keyed by the UNIQUE(product_id, version) constraint.
+            sql = re.sub(
+                r"^\s*INSERT\s+OR\s+REPLACE\s+INTO\s+formulations",
+                "INSERT INTO formulations",
+                sql,
+                flags=re.IGNORECASE,
+            )
+            sql = sql.rstrip().rstrip(";")
+            sql += (
+                " ON CONFLICT (product_id, version) DO UPDATE SET"
+                " payload_json = EXCLUDED.payload_json,"
+                " source = EXCLUDED.source,"
+                " label = EXCLUDED.label,"
+                " created_at = EXCLUDED.created_at"
+            )
+        return sql.replace("?", "%s")
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
+        statement = self._translate(sql)
+        cursor = self.conn.cursor()
+        cursor.execute(statement, tuple(params or ()))
+        if INSERT_STATEMENT.match(statement) and "RETURNING" not in statement.upper():
+            # psycopg does not populate lastrowid; LASTVAL() returns the value most
+            # recently produced by a sequence in this session, which is exactly the
+            # id the caller wants straight after an insert into a SERIAL column.
+            try:
+                probe = self.conn.cursor()
+                probe.execute("SELECT LASTVAL()")
+                row = probe.fetchone()
+                probe.close()
+                if row is not None:
+                    cursor.lastrowid = next(iter(row.values())) if isinstance(row, dict) else row[0]
+            except Exception:  # pragma: no cover - table without a sequence
+                pass
+        return cursor
+
+    def executescript(self, sql: str) -> None:
+        cursor = self.conn.cursor()
+        for statement in _split_statements(sql):
+            cursor.execute(statement)
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
+
+
+def _split_statements(sql: str) -> List[str]:
+    """Split a schema script into statements.
+
+    Schema files here contain no dollar-quoted bodies or semicolons inside string
+    literals, so a plain split on ``;`` is sufficient and is asserted by a test.
+    Comment lines are stripped *before* the emptiness test, not used as a reason
+    to skip the chunk: a file whose header comment precedes the first CREATE
+    TABLE would otherwise have that table silently dropped.
+    """
+    statements: List[str] = []
+    for chunk in sql.split(";"):
+        lines = [line for line in chunk.splitlines() if not line.strip().startswith("--")]
+        cleaned = "\n".join(lines).strip()
+        if not cleaned:
+            continue
+        statements.append(cleaned)
+    return statements
+
+
+def driver_available(url: str) -> Tuple[bool, str]:
+    """Whether the driver for a URL is importable, and a human-readable reason."""
+    if url.startswith("sqlite:"):
+        return True, "sqlite3 (standard library)"
+    if url.startswith(("postgres://", "postgresql://")):
+        try:
+            import psycopg  # type: ignore  # noqa: F401
+
+            return True, "psycopg"
+        except ImportError:
+            return False, POSTGRES_DRIVER_HINT
+    return False, f"unsupported database URL: {url}"
+
+
+def connect(url: str) -> Connection:
+    """Open a connection for a database URL."""
+    if url.startswith("sqlite:"):
+        _, _, tail = url.partition("sqlite:///")
+        if not tail or tail == ":memory:":
+            return SqliteConnection(None)
+        return SqliteConnection(Path(tail))
+    if url.startswith(("postgres://", "postgresql://")):
+        return PostgresConnection(url)
+    raise ValueError(f"unsupported database URL: {url}")

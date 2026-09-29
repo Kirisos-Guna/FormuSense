@@ -86,7 +86,18 @@ def _perturbed(formulation: Formulation, config: PlantConfig) -> Formulation:
                 pct *= carried
         items.append(Item(item.ingredient_id, pct, item.slot))
     params = dict(formulation.params)
-    for key in ("bake_temp_c", "cook_temp_c", "dryer_temp_c", "roast_temp_c", "barrel_temp_c"):
+    for key in (
+        "bake_temp_c",
+        "cook_temp_c",
+        "dryer_temp_c",
+        "roast_temp_c",
+        "barrel_temp_c",
+        # A drink's heat treatment is its process temperature: a fouled heat
+        # exchanger delivers less than the controller reads, exactly like a
+        # mis-placed thermocouple on an oven.
+        "heat_treat_temp_c",
+        "hydration_temp_c",
+    ):
         if key in params:
             params[key] = params[key] + config.temp_offset_c
     return Formulation(
@@ -189,6 +200,10 @@ def run_trial(
         "screw_speed_rpm",
         "feed_moisture_pct",
         "syrup_temp_c",
+        "heat_treat_temp_c",
+        "hold_time_s",
+        "hydration_temp_c",
+        "homogenisation_bar",
     ):
         if key in actual.params:
             actuals[key] = round(actual.params[key], 3)

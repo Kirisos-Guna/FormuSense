@@ -64,6 +64,11 @@ CATEGORY_KEYWORDS: Dict[str, Tuple[str, ...]] = {
         "sauce", "chutney", "ketchup", "dip", "paste gravy", "gravy", "relish",
         "mayonnaise", "thokku", "pickle",
     ),
+    "beverage": (
+        "ready to drink", "ready-to-drink", "rtd", "protein shake", "milkshake",
+        "smoothie", "liquid protein", "protein water", "protein beverage",
+        "protein drink", "bottled drink", "whey beverage", "lassi", "buttermilk",
+    ),
 }
 
 DIET_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
@@ -166,7 +171,24 @@ _UNIT_WEIGHT_PATTERNS = [
     r"([\d.]+)\s*(kg)\s*(?:pack|pouch|box|unit)",
     r"per\s*(?:unit|piece|pack|bar)" + _GAP + r"([\d.]+)\s*(g|gram)",
     r"([\d.]+)\s*(g|gram)\s*(?:pack|pouch|unit|bar|piece|serving)",
+    # A beverage is sized in millilitres, not grams. For a drink of density near
+    # 1 g/ml the two are interchangeable for target purposes, and the nutrition
+    # engine applies the real density when it reports per 100 ml.
+    r"([\d.]+)\s*(ml)\s*(?:bottle|can|tetra|carton|jar|pack|pouch)",
+    r"(?:unit|net|pack|serving|bottle|can|jar|carton)\s*weight" + _GAP + r"([\d.]+)\s*(ml|kg|g|gram)",
 ]
+
+# Nutrient figures are quoted per 100 g by convention, but a supplement is
+# almost always quoted per serving ("20 g protein per bottle"). A per-serving
+# number has to be converted before it can be compared with the per-100 g model.
+_PER_SERVING_BASIS = re.compile(
+    r"(?:per|/)\s*(?:serving|bottle|pack|pouch|bar|unit|piece|can|carton|tetra|jar|sachet)\b",
+    re.IGNORECASE,
+)
+_PER_100_BASIS = re.compile(r"per\s*(?:100\s*(?:ml|g)|100ml|100g)\b", re.IGNORECASE)
+_SERVING_CONVERTIBLE = frozenset(
+    {"energy_kcal", "protein_g", "fat_g", "satfat_g", "carb_g", "sugar_g", "fibre_g", "sodium_mg"}
+)
 
 # Comparators appear between the nutrient name and its number - "sugar <= 12 g",
 # "aw not more than 0.90" - so they are read out of the matched text itself.
@@ -189,14 +211,44 @@ def _first_number(text: str, patterns: Iterable[str]) -> Optional[float]:
     return None
 
 
+def _declared_unit_weight(text: str) -> Optional[float]:
+    """The declared net/unit weight in grams (millilitres treated as grams)."""
+    for pattern in _UNIT_WEIGHT_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            value = float(match.group(1))
+            return value * 1000.0 if match.group(2).lower().startswith("k") else value
+    return None
+
+
+def _comparator_in(window: str) -> str:
+    found = _COMPARATOR.search(window)
+    if not found:
+        return ""
+    token = found.group(1).lower().strip()
+    if token in (
+        "<=", "<", "max", "maximum", "up to", "at most",
+        "not more than", "no more than", "less than", "under", "below",
+    ):
+        return "<="
+    if token in (">=", ">", "min", "minimum", "at least", "more than", "over", "above"):
+        return ">="
+    return ""
+
+
 def parse_spec_numbers(text: str) -> Dict[str, Dict[str, Any]]:
     """Extract every numeric specification the text declares.
 
     Returns ``{kpi_id: {"value": float, "comparator": str}}``. The comparator is
     kept because ``sugar <= 8 g`` and ``sugar 8 g`` mean different things to a
     developer: the first is a ceiling, the second is a point target.
+
+    A figure quoted per serving is recalculated onto the per-100 g basis the
+    models use, and the conversion is recorded on the row so the brief can show
+    the original declaration alongside the derived target.
     """
     out: Dict[str, Dict[str, Any]] = {}
+    unit_weight = _declared_unit_weight(text)
     for kpi_id, patterns in _NUM_PATTERNS.items():
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -207,27 +259,29 @@ def parse_spec_numbers(text: str) -> Dict[str, Dict[str, Any]]:
             except (TypeError, ValueError):
                 continue
             window = match.group(0)
-            comparator = ""
-            found = _COMPARATOR.search(window)
-            if found:
-                token = found.group(1).lower().strip()
-                if token in (
-                    "<=",
-                    "<",
-                    "max",
-                    "maximum",
-                    "up to",
-                    "at most",
-                    "not more than",
-                    "no more than",
-                    "less than",
-                    "under",
-                    "below",
-                ):
-                    comparator = "<="
-                elif token in (">=", ">", "min", "minimum", "at least", "more than", "over", "above"):
-                    comparator = ">="
-            out[kpi_id] = {"value": value, "comparator": comparator, "evidence": match.group(0).strip()}
+            # The basis word ("per bottle", "per 100 ml") sits just after the
+            # number, so a short tail of the text is part of the window.
+            basis_text = window + " " + text[match.end(): match.end() + 28]
+            converted_from = None
+            if kpi_id in _SERVING_CONVERTIBLE and unit_weight and unit_weight > 0:
+                serving = _PER_SERVING_BASIS.search(basis_text)
+                per100 = _PER_100_BASIS.search(basis_text)
+                if serving and (per100 is None or serving.start() <= per100.start()):
+                    converted_from = value
+                    value = value * 100.0 / unit_weight
+            row: Dict[str, Any] = {
+                "value": value,
+                "comparator": _comparator_in(window),
+                "evidence": window.strip(),
+            }
+            if converted_from is not None:
+                row["per_serving"] = converted_from
+                row["basis"] = "per serving"
+                row["evidence"] = (
+                    f"{window.strip()} (declared per serving; recalculated to per 100 g "
+                    f"using a {unit_weight:g} g serving)"
+                )
+            out[kpi_id] = row
             break
 
     shelf = re.search(_MONTH_PATTERN, text, re.IGNORECASE)
@@ -240,14 +294,6 @@ def parse_spec_numbers(text: str) -> Dict[str, Dict[str, Any]]:
             value *= 365.0
         out["shelf_life_days"] = {"value": value, "comparator": "", "evidence": shelf.group(0).strip()}
 
-    unit_weight = None
-    for pattern in _UNIT_WEIGHT_PATTERNS:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            value = float(match.group(1))
-            unit = match.group(2).lower()
-            unit_weight = value * 1000.0 if unit.startswith("k") else value
-            break
     if unit_weight:
         out["__unit_weight_g"] = {"value": unit_weight, "comparator": "", "evidence": "declared net weight"}
     return out
@@ -387,6 +433,31 @@ DEFAULT_TARGETS: Dict[str, List[Tuple[str, float, float, float, bool]]] = {
         ("cost_inr_kg", 290.0, 25.0, 1.2, True),
         ("shelf_life_days", 180.0, 35.0, 0.9, False),
         ("processability_score", 74.0, 8.0, 0.7, False),
+    ],
+    "beverage": [
+        # A protein drink is a water-based product: total protein per 100 g is
+        # the headline target, and the population section turns it into grams per
+        # serving and a share of each group's daily requirement.
+        ("protein_g", 10.0, 1.5, 1.4, True),
+        ("energy_kcal", 60.0, 15.0, 0.9, False),
+        ("sugar_g", 6.0, 1.5, 1.0, True),
+        ("fat_g", 2.0, 0.8, 0.8, False),
+        ("sodium_mg", 90.0, 25.0, 0.8, False),
+        # Moisture and water activity are properties of a drink, not levers: a
+        # beverage is ~86% water and aw ~0.97 by construction, and it is
+        # preserved by heat treatment and packaging, not by drying. They are
+        # reported and monitored, never gated.
+        ("moisture_pct", 86.0, 5.0, 0.7, False),
+        # A drink's aw is 0.95-0.995 by construction (the category range), so the
+        # band is the category, not a figure to aim at. Tightening it to 0.97 +/-
+        # 0.02 turned a normal drink into a reported "conflict" with no lever.
+        ("water_activity", 0.98, 0.03, 0.5, False),
+        ("ph", 6.60, 0.30, 0.9, False),
+        ("shelf_life_days", 180.0, 40.0, 1.1, True),
+        ("consistency_index", 18.0, 8.0, 0.8, False),
+        ("processability_score", 85.0, 8.0, 0.7, False),
+        ("cost_inr_kg", 320.0, 30.0, 1.2, True),
+        ("mould_risk", 15.0, 10.0, 0.6, False),
     ],
     "sauce": [
         ("ph", 3.80, 0.20, 1.2, True),

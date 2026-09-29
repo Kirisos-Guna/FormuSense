@@ -50,6 +50,7 @@ PH_BUFFER_M = {
     "extruded_snack": 0.0100,
     "bar": 0.0120,
     "sauce": 0.0132,
+    "beverage": 0.0180,
 }
 # Maximum pH drop the model will ever attribute to added acid.
 PH_MAX_DROP = 1.80
@@ -66,6 +67,8 @@ PH_BASELINE = {
     "extruded_snack": 6.2,
     "bar": 6.0,
     "sauce": 4.4,
+    # A milk/whey-based drink sits near neutral before any acid is added.
+    "beverage": 6.6,
 }
 
 
@@ -127,6 +130,11 @@ def predict_moisture(category: str, mix_moisture: float, params: Dict[str, float
         syrup = params.get("syrup_temp_c", 105.0)
         moisture = _clamp(m0 * 0.95 - 0.05 * (syrup - 105.0), 6.0, 18.0)
         note = "slab moisture after syrup binding and cooling"
+    elif category == "beverage":
+        # A drink is filled as blended: there is no drying step, so the finished
+        # moisture is the mix moisture, set by how much water the slots carry.
+        moisture = _clamp(m0, 70.0, 95.0)
+        note = "no concentration step: filled at the blended moisture (water is a formulation slot)"
     else:
         moisture = m0
         note = "no moisture change modelled for this category"
@@ -306,6 +314,36 @@ def predict_texture(comp: Composition, category: str, params: Dict[str, float]) 
         firmness += 0.22 * (params.get("syrup_temp_c", 105.0) - 100.0)
     if category == "cookie":
         firmness += 0.04 * (params.get("bake_temp_c", 175.0) - 175.0)
+    if category == "beverage":
+        # A drink's useful texture number is viscosity, not firmness. It is set by
+        # the hydrocolloid, dissolved solids and protein, and it must stay low
+        # enough to pour; the firmness index is meaningless for a liquid, so the
+        # reported texture index becomes the (low) viscosity reading.
+        starch_gel_b = comp.aggregates["starch_frac"] * comp.aggregates["concentration_factor"]
+        hydrocolloid_b = comp.aggregates["hydrocolloid_frac"] * comp.aggregates["concentration_factor"]
+        viscosity = _clamp(
+            3.0
+            + 1200.0 * hydrocolloid_b
+            + 180.0 * starch_gel_b
+            + 0.30 * (100.0 - moisture)
+            + 18.0 * (sugar / 100.0)
+            + 0.25 * protein,
+            0.0,
+            100.0,
+        )
+        values = {
+            "texture_index": _clamp(0.6 * viscosity, 1.0, 100.0),
+            "hardness_n": 0.0,
+            "consistency_index": viscosity,
+            "spreadability": _clamp(100.0 - viscosity, 0.0, 100.0),
+        }
+        note = (
+            "beverage viscosity index from hydrocolloid "
+            f"{hydrocolloid_b*100:.2f}%, dissolved solids and protein "
+            f"{protein:.1f} g/100 g at {moisture:.1f}% moisture; "
+            "firmness and hardness are not meaningful for a liquid"
+        )
+        return values, note
     strength = _clamp(firmness, 1.0, 100.0)
     hardness_n = 1.70 * (strength ** 0.90)
     # A thick sauce gets its body from gelatinised starch as much as from a
@@ -341,7 +379,13 @@ def predict_texture(comp: Composition, category: str, params: Dict[str, float]) 
 # --------------------------------------------------------------------------- #
 # Stability
 # --------------------------------------------------------------------------- #
-def predict_stability(comp: Composition, aw: float, ph: float, category: str) -> Tuple[Dict[str, float], str]:
+def predict_stability(
+    comp: Composition,
+    aw: float,
+    ph: float,
+    category: str,
+    params: Optional[Dict[str, float]] = None,
+) -> Tuple[Dict[str, float], str]:
     # Effectiveness is driven by parts-per-million in the finished product:
     # 800 ppm of sorbate is close to full effectiveness in an acid product, and
     # 60 ppm is close to none.
@@ -351,6 +395,49 @@ def predict_stability(comp: Composition, aw: float, ph: float, category: str) ->
     preservative_eff = min(1.0, preservative_ppm / 600.0)
     antioxidant_eff = min(1.0, antioxidant_ppm / 250.0)
     unsat_fat_g = comp.aggregates["unsaturated_fat_frac"] * 100.0 * comp.aggregates["concentration_factor"]
+
+    if category == "beverage":
+        # Shelf life of a drink is set by the validated heat process and the
+        # packaging, not by water activity: aw is ~0.97 whatever the recipe, so
+        # the aw-based mould model below would hand a UHT product a 40-day life.
+        heat = float((params or {}).get("heat_treat_temp_c", 121.0))
+        hold = float((params or {}).get("hold_time_s", 4.0))
+        if heat >= 135.0:
+            base_life, process = 270.0, "UHT / aseptic"
+        elif heat >= 115.0:
+            base_life, process = 210.0, "sterilised / retort"
+        else:
+            base_life, process = 45.0, "pasteurised (chilled distribution)"
+        hold_factor = _clamp(hold / 4.0, 0.4, 1.6)
+        acidity_bonus = _clamp(1.0 + 0.45 * (4.6 - ph), 1.0, 2.0)
+        water_life = base_life * hold_factor * acidity_bonus * (1.0 + 0.8 * preservative_eff)
+        oxidation_life = 450.0 * math.exp(-0.075 * max(unsat_fat_g, 0.0)) * (1.0 + 0.9 * antioxidant_eff)
+        shelf_life = min(water_life, oxidation_life)
+        # A validated sterilising heat treatment removes the mould risk a high-aw
+        # liquid would otherwise carry; a pasteurised drink keeps it.
+        process_mould = 6.0 if heat >= 115.0 else 45.0
+        mould_risk = _clamp(
+            process_mould - 25.0 * preservative_eff + 6.0 * math.tanh((ph - 4.6) * 1.5),
+            0.0,
+            100.0,
+        )
+        oxidation_risk = _clamp(
+            100.0 * min(1.0, unsat_fat_g / 20.0) * (1.0 - 0.6 * antioxidant_eff), 0.0, 100.0
+        )
+        values = {
+            "shelf_life_days": round(shelf_life, 1),
+            "mould_risk": mould_risk,
+            "oxidation_risk": oxidation_risk,
+            "water_life_days": round(water_life, 1),
+            "oxidation_life_days": round(oxidation_life, 1),
+        }
+        note = (
+            f"shelf life from the heat process ({process} at {heat:.0f} degC, "
+            f"{hold:.0f} s hold): base {base_life:.0f} d x hold {hold_factor:.2f} "
+            f"x acidity {acidity_bonus:.2f} x preservative {1.0 + 0.8 * preservative_eff:.2f}; "
+            "water activity does not limit a drink"
+        )
+        return values, note
 
     # Mould-free life falls sharply with water activity. The high-aw branch is
     # calibrated on the products that actually live there: a hot-filled, acid,
@@ -442,6 +529,18 @@ def predict_processability(comp: Composition, category: str, params: Dict[str, f
         if params.get("screw_speed_rpm", 340.0) > 420.0:
             score -= 4.0
             drivers.append("high screw speed - shear/over-cooking risk")
+    if category == "beverage":
+        if params.get("homogenisation_bar", 180.0) < 100.0:
+            score -= 5.0
+            drivers.append("low homogenisation pressure - sedimentation and cream-ring risk")
+        if comp.final["protein_g"] > 8.0:
+            score -= 4.0
+            drivers.append("high protein load - heat stability and viscosity control needed")
+        if int(comp.aggregates["ingredient_count"]) == 0:
+            drivers.append("no ingredients resolved for the beverage")
+        if comp.aggregates["water_binding_frac"] > 0.15:
+            score -= 3.0
+            drivers.append("high water-binding load - viscosity build during blending")
     if comp.aggregates["water_binding_frac"] > 0.20:
         score -= 6.0
         drivers.append("high aggregate water binding - viscosity build during mixing")

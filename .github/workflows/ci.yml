@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  offline:
+    name: Offline suite (stdlib only, Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Assert the standard library is enough
+        # The whole point of the offline story: nothing is installed before the
+        # suite runs, so a stray third-party import fails the build.
+        run: python -c "import sys; print(sys.version)"
+
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Seed the demonstration cases
+        run: python run.py --seed
+
+      - name: Benchmark smoke test
+        # The agent must still beat one-factor-at-a-time on the seeded cases.
+        run: |
+          python - <<'PY'
+          from app.benchmark import run_benchmark
+          report = run_benchmark(max_trials=4, include_conflict=True)
+          summary = report["summary"]
+          print(summary)
+          assert summary["agent_successes"] > summary["ofat_successes"], summary
+          assert summary["agent_mean_trials_to_target"] < summary["ofat_mean_trials_to_target"], summary
+          assert report["conflict_demonstration"]["conflicts"], "the infeasible brief must be reported"
+          PY
+
+  learning:
+    name: Dataset and model training
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the acceptance dataset
+        run: python run.py --build-dataset --variants 20
+
+      - name: Train and evaluate the acceptance model
+        run: python run.py --train
+
+      - name: Print the model report
+        run: python run.py --train-report
+
+  postgres:
+    name: PostgreSQL round-trip
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: formu
+          POSTGRES_PASSWORD: formu
+          POSTGRES_DB: formusense
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U formu" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the PostgreSQL driver
+        run: pip install "psycopg[binary]"
+
+      - name: Migrate, write and read back the record on PostgreSQL
+        env:
+          FORMUSENSE_DB_URL: postgresql://formu:formu@localhost:5432/formusense
+          FORMUSENSE_TEST_POSTGRES: postgresql://formu:formu@localhost:5432/formusense
+        run: |
+          python - <<'PY'
+          from app.store import Store
+          from app.core.brief import build_brief
+          store = Store()
+          print("dialect:", store.dialect, "migrations:", store.migrations["applied"])
+          pid = store.create_product(build_brief({"product_name": "ci pg", "category": "cookie", "spec_text": ""}))
+          assert store.product(pid), "write/read failed"
+          store.clear(pid)
+          store.close()
+          PY
+          python -m unittest tests.test_db -v

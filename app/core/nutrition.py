@@ -20,6 +20,14 @@ KCAL_FIBRE = 2.0
 
 NUTRIENTS = ("protein_g", "fat_g", "satfat_g", "carb_g", "sugar_g", "fibre_g", "sodium_mg")
 
+# Categories that are a continuous liquid at ambient: their composition is more
+# naturally quoted per 100 ml than per 100 g, and their density can be modelled
+# from dissolved solids rather than from the bulk density of powders.
+LIQUID_CATEGORIES = ("beverage", "sauce", "spread")
+# Density gain per gram of dissolved solids per 100 g, in g/ml. Calibrated on
+# sugar solutions and milk-based drinks: ~14 g solids/100 g gives ~1.05 g/ml.
+DENSITY_PER_SOLID_G = 0.0035
+
 # Average molar masses used for the aqueous-phase (water activity) model.
 MW_SUGAR = 300.0
 MW_ACID_DEFAULT = 150.0
@@ -47,15 +55,33 @@ class Composition:
     dissolved_g: float = 0.0
     item_detail: List[Dict[str, object]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    density_g_per_ml: float = 1.0
 
     @property
     def energy_kcal(self) -> float:
         return self.final.get("energy_kcal", 0.0)
 
+    @property
+    def is_liquid(self) -> bool:
+        return self.category in LIQUID_CATEGORIES
+
     def value(self, key: str) -> float:
         if key in self.final:
             return self.final[key]
         return self.aggregates.get(key, 0.0)
+
+    def per_100ml(self) -> Dict[str, float]:
+        """Composition per 100 ml: per-100 g values scaled by the density.
+
+        100 ml of product weighs 100 x density grams, so a nutrient quoted per
+        100 g becomes ``per_100g x density`` per 100 ml.
+        """
+        return {key: value * self.density_g_per_ml for key, value in self.final.items()}
+
+    def per_serving(self, serving_g: float) -> Dict[str, float]:
+        """Composition of one serving, given the serving mass in grams."""
+        factor = max(float(serving_g), 0.0) / 100.0
+        return {key: value * factor for key, value in self.final.items()}
 
 
 def _energy(protein: float, fat: float, carb: float, fibre: float) -> float:
@@ -225,8 +251,11 @@ def analyse(formulation, final_moisture: float) -> Composition:
         final["protein_g"], final["fat_g"], final["carb_g"], final["fibre_g"]
     )
 
+    density = _density(formulation, final_moisture, table)
+
     aggregates["final_total_g"] = final_total
     aggregates["concentration_factor"] = scale
+    aggregates["density_g_per_ml"] = density
     aggregates["sugar_equiv_g"] = sugar_equiv * scale
     aggregates["polyol_g"] = polyol_g * scale
     aggregates["salt_g"] = salt_g * scale
@@ -249,8 +278,33 @@ def analyse(formulation, final_moisture: float) -> Composition:
         salt_g=salt_g * scale,
         item_detail=detail,
         warnings=warnings,
+        density_g_per_ml=density,
     )
     return comp
+
+
+def _density(formulation, final_moisture: float, table: Dict[str, object]) -> float:
+    """Product density in g/ml.
+
+    A liquid's density is driven by its dissolved solids, so it is modelled from
+    the dry matter (the ingredient ``dens`` figures are *bulk* densities of
+    powders, which would give a drink 0.7 g/ml). A solid's density is the
+    mass-weighted bulk density of its lines, which is only used for reference.
+    """
+    if formulation.category in LIQUID_CATEGORIES:
+        solids = max(100.0 - final_moisture, 0.0)
+        return float(min(1.0 + DENSITY_PER_SOLID_G * solids, 1.20))
+    total = 0.0
+    weighted = 0.0
+    for item in formulation.items:
+        ing = table.get(item.ingredient_id)
+        if ing is None:
+            continue
+        total += item.pct
+        weighted += item.pct * float(getattr(ing, "density", 0.6))
+    if total <= 1e-9:
+        return 1.0
+    return float(weighted / total)
 
 
 def nutrition_kpis(comp: Composition) -> Dict[str, float]:

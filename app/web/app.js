@@ -14,6 +14,8 @@
     products: [],
     product: null,
     benchmark: null,
+    health: null,
+    welcome: false,
     images: [],
     busy: 0
   };
@@ -56,6 +58,43 @@
   }
 
   function tag(text, cls) { return "<span class='tag " + esc(cls || "") + "'>" + esc(text) + "</span>"; }
+
+  /* Local storage is a convenience, never a requirement: a browser that blocks
+   * it (private mode, a locked-down policy) must still boot the whole app. */
+  function storageGet(key) {
+    try { return window.localStorage.getItem(key); } catch (error) { return null; }
+  }
+
+  function storageSet(key, value) {
+    try { window.localStorage.setItem(key, value); } catch (error) { /* not fatal */ }
+  }
+
+  var VISITED_KEY = "formusense.visited";
+
+  /* Move the reading position to the heading of the new view, so a route change
+   * is announced to a screen reader instead of silently swapping the page. */
+  function focusView() {
+    var node = document.querySelector("#view h2, #view h3");
+    if (!node) return;
+    node.setAttribute("tabindex", "-1");
+    try { node.focus({ preventScroll: true }); } catch (error) { node.focus(); }
+  }
+
+  /* The seeded case studies, offered as one-click example briefs: filling the
+   * form from a real case is friendlier than an empty textarea, and it cannot
+   * drift from the cases the service actually offers. */
+  function exampleCases() {
+    return (state.cases || []).filter(function (item) { return item.feasible; });
+  }
+
+  function exampleBriefs() {
+    var examples = exampleCases();
+    if (!examples.length) return "";
+    return "<div class='examples'><span class='small muted'>Not sure what to write? Load an example brief:</span>" +
+      examples.map(function (item, index) {
+        return "<button type='button' class='chip' data-example='" + index + "'>" + esc(item.name) + "</button>";
+      }).join("") + "</div>";
+  }
 
   function toast(message, bad) {
     var el = document.getElementById("toast");
@@ -161,8 +200,12 @@
     var vision = health.vision || {};
     var el = document.getElementById("status-vision");
     var online = vision.openai || vision.gemini;
-    el.textContent = online ? ("vision: " + (vision.provider || "API")) : "vision: Pillow only";
-    el.className = "pill" + (online ? " ok" : "");
+    // Report what this machine can actually do: the drawing extras are an
+    // optional install, so "Pillow only" is wrong when Pillow is absent.
+    var label = online ? ("vision: " + (vision.provider || "API"))
+      : (vision.pillow ? "vision: Pillow only" : "vision: image analysis off");
+    el.textContent = label;
+    el.className = "pill" + (online ? " ok" : (vision.pillow ? "" : " warn"));
   }
 
   function view() { return document.getElementById("view"); }
@@ -189,6 +232,7 @@
     html.push("<p class='card-sub'>Write the specification the way a brand team would send it: targets, claims, pack size, cost, shelf life. The agent parses the numbers out of the text and shows you what it understood before anything is formulated.</p>");
     html.push("<label class='field'><span>Product name</span><input type='text' id='f-name' value='" + esc(prefill && prefill.product_name || "") + "' placeholder='e.g. High-protein ragi cookie'></label>");
     html.push("<label class='field'><span>Specification text</span><textarea id='f-spec' placeholder='High protein masala extruded namkeen. 30 g pack. Protein 15 g per 100 g. Moisture 3%. Sodium 480 mg per 100 g. Shelf life 6 months. Ingredient cost not more than INR 185 per kg.'>" + esc(spec) + "</textarea></label>");
+    html.push(exampleBriefs());
     html.push("<div class='inline'>");
     html.push("<label class='field'><span>Category</span><select id='f-category'>" +
       catalog.categories.map(function (c) {
@@ -208,12 +252,17 @@
         return "<label><input type='checkbox' value='" + esc(id) + "'>" + esc(catalog.allergens[id]) + "</label>";
       }).join("") + "</div></div>");
     html.push("<div class='field'><span>Reference images (optional)</span><div class='file-drop' id='drop'>Drop product photos here, or click to choose. Offline Pillow analysis always runs; add an OpenAI or Gemini key for the semantic layer.</div><input type='file' id='files' accept='image/*' multiple hidden><div class='thumbs' id='thumbs'></div></div>");
-    html.push("<div class='row end'><button class='ghost' id='btn-clear'>Clear</button><button class='primary' id='btn-design'>Design product</button></div>");
+    html.push("<div class='row end'><span class='small muted' id='design-hint'>A specification text is required.</span>" +
+      "<button class='ghost' id='btn-clear'>Clear</button><button class='primary' id='btn-design'>Design product</button></div>");
     html.push("</div>");
 
     html.push("<div class='stack'>");
+    // The plant is real but advanced: most users want the standard pilot plant,
+    // so the deviations live behind one disclosure instead of six blank fields.
+    var plantCustom = !!(plant && Object.keys(plant).length);
     html.push("<div class='card'><h3>Manufacturing plant</h3><p class='card-sub'>A formulation is designed for a plant. These are the deviations the agent has to plan around - the same knobs the simulated pilot plant uses for the physical trials.</p>" +
-      plantFields(plant) + "</div>");
+      "<details class='advanced'" + (plantCustom ? " open" : "") + "><summary>Advanced: plant settings<span class='small muted'> - standard pilot plant unless you change something</span></summary>" +
+      plantFields(plant) + "</details></div>");
     html.push("<div class='card'><h3>What happens next</h3><ol class='bullets small'>" +
       "<li><strong>Understand:</strong> the specification is parsed into targets, claims, diet and allergens, with the questions that remain open listed for you.</li>" +
       "<li><strong>Design:</strong> a first formulation is generated against those targets and optimised against the models (mass balance, water activity, pH, texture, cost, stability).</li>" +
@@ -290,11 +339,41 @@
       document.getElementById("p-sodium").value = values.sodium_carry;
       document.getElementById("p-inversion").value = values.sugar_inversion;
     });
+    var specField = document.getElementById("f-spec");
+    var design = document.getElementById("btn-design");
+    var hint = document.getElementById("design-hint");
+    function refreshDesignState() {
+      var ready = specField.value.trim().length > 0;
+      design.disabled = !ready;
+      hint.textContent = ready ? "" : "Write (or load) a specification text first.";
+    }
+    specField.addEventListener("input", refreshDesignState);
+    refreshDesignState();
+
+    var examples = exampleCases();
+    Array.prototype.forEach.call(document.querySelectorAll("[data-example]"), function (chip) {
+      chip.addEventListener("click", function () {
+        var item = examples[Number(chip.getAttribute("data-example"))];
+        if (!item) return;
+        var payload = item.payload || {};
+        document.getElementById("f-name").value = payload.product_name || item.name || "";
+        specField.value = payload.spec_text || "";
+        if (payload.category) document.getElementById("f-category").value = payload.category;
+        if (payload.diet) document.getElementById("f-diet").value = payload.diet;
+        if (payload.unit_weight_g) document.getElementById("f-unit").value = payload.unit_weight_g;
+        Array.prototype.forEach.call(document.querySelectorAll("#f-claims input"), function (input) {
+          input.checked = (payload.claims || []).indexOf(input.value) >= 0;
+        });
+        refreshDesignState();
+        toast("Example brief loaded - edit it, or press Design product");
+      });
+    });
+
     document.getElementById("btn-clear").addEventListener("click", function () {
       state.images = [];
       location.hash = "#/new";
     });
-    document.getElementById("btn-design").addEventListener("click", function () {
+    design.addEventListener("click", function () {
       designProduct(collectForm());
     });
   }
@@ -365,8 +444,15 @@
     setActiveNav("products");
     var html = ["<div class='card'><div class='card-head'><h2>Products</h2><span class='card-sub'>" +
       state.products.length + " product(s) on record</span></div>"];
+    if (state.welcome) {
+      html.push("<div class='welcome'><h3>Welcome to FormuSense</h3><p>New here? The guide takes you from a written brief to a first formulation in about five minutes, and the case studies turn a complete product and its trial history in one press.</p>" +
+        "<div class='row'><a class='cta primary' href='#/guide'>Read the five-minute guide</a><a class='cta' href='#/cases'>Load a case study</a>" +
+        "<button class='ghost' data-dismiss-welcome>Dismiss</button></div></div>");
+    }
     if (!state.products.length) {
-      html.push("<p class='muted'>Nothing yet. <a href='#/cases'>Load a case study</a> or <a href='#/new'>describe a product</a>.</p>");
+      html.push("<div class='empty'><p><strong>No products yet.</strong> Start from a brief of your own, or load one of the seeded case studies and watch the loop run.</p>" +
+        "<div class='row'><a class='cta primary' href='#/new'>Describe a product</a><a class='cta' href='#/cases'>Load a case study</a>" +
+        "<a class='cta' href='#/guide'>How to use the app</a></div></div>");
     } else {
       html.push("<div class='scroll'><table><thead><tr><th>Product</th><th>Category</th><th class='num'>Versions</th><th class='num'>Trials</th><th class='num'>Predicted objective</th><th class='nowrap'>Created</th><th></th></tr></thead><tbody>");
       state.products.forEach(function (product) {
@@ -383,6 +469,13 @@
     }
     html.push("</div>");
     view().innerHTML = html.join("");
+    Array.prototype.forEach.call(view().querySelectorAll("[data-dismiss-welcome]"), function (button) {
+      button.addEventListener("click", function () {
+        state.welcome = false;
+        storageSet(VISITED_KEY, "1");
+        renderProducts();
+      });
+    });
     Array.prototype.forEach.call(view().querySelectorAll("[data-delete]"), function (button) {
       button.addEventListener("click", function () {
         var id = Number(button.getAttribute("data-delete"));
@@ -434,7 +527,8 @@
       "<button class='primary' id='b-run'>Run benchmark</button></div></div>" +
       "<p class='card-sub'>Both arms start from the same first formulation, on the same plant, with the same measurement model and the same success gate: every hard target inside its declared tolerance and a measured objective of at least 0.85. The agent diagnoses the residual, corrects a measured process offset, fits a residual model and reformulates with a constrained optimiser. The comparison arm is one-factor-at-a-time, the way a development kitchen works without a diagnosis engine: change the single most promising factor for the worst target, keep it if the batch improves, revert it if it does not. Trials to target is censored at the budget for an arm that never gets there.</p></div>"];
     if (!report) {
-      html.push("<div class='card'><p class='muted'>No benchmark has been run in this database yet.</p></div>");
+      html.push("<div class='empty'><p><strong>No benchmark has been run in this database yet.</strong> It compares the agent's closed loop with one-factor-at-a-time on the same cases, budget and pass gate.</p>" +
+        "<p class='small muted'>Set a budget above and press <em>Run benchmark</em>, or run <code>python run.py --benchmark</code> from the command line.</p></div>");
     } else {
       var summary = report.summary || {};
       html.push("<div class='grid halves'>");
@@ -482,7 +576,7 @@
     if (run) {
       run.addEventListener("click", function () {
         var budget = Number(document.getElementById("b-trials").value) || 6;
-        withBusy("Running the benchmark", "Two arms, three products, up to " + budget + " physical trials each. This takes about twenty seconds.", function () {
+        withBusy("Running the benchmark", "Two arms, same cases, same budget of " + budget + " physical trials each. This takes about twenty seconds.", function () {
           return api("POST", "/api/benchmark", { max_trials: budget, include_conflict: true }).then(function (payload) {
             state.benchmark = payload.benchmark;
             renderBenchmark();
@@ -539,7 +633,47 @@
   }
 
   /* --------------------------------------------------------------- product */
-  var TABS = ["overview", "prediction", "trials", "plan", "process", "report", "ledger"];
+  var TABS = ["overview", "prediction", "populations", "trials", "plan", "process", "report", "ledger"];
+
+  /* What the record says the next useful action is. This is advice drawn from
+   * the stored state, not a judgement: it mirrors the header buttons and never
+   * invents a step the data does not support. */
+  function nextStep(product, record) {
+    var id = product.product.id;
+    var efficiency = product.efficiency || {};
+    var trials = (product.trials || []).length;
+    var proposed = (product.plans || []).filter(function (plan) { return !plan.accepted; });
+    if (efficiency.trials_to_target) {
+      return {
+        tone: "good",
+        title: "Target reached",
+        body: "Every hard target is inside its tolerance and the measured objective is at or above the pass bar. Keep the record, or open the report for the full story.",
+        action: { label: "Open the report", href: "#/product/" + id + "/report" }
+      };
+    }
+    if (proposed.length) {
+      return {
+        tone: "warn",
+        title: "A plan is waiting for a decision",
+        body: "The agent has proposed the next version with a pass probability. Review the recipe and process changes and accept the plan, or leave it and plan again.",
+        action: { label: "Review the plan", href: "#/product/" + id + "/plan" }
+      };
+    }
+    if (!trials) {
+      return {
+        tone: "info",
+        title: "Next step: run the first physical trial",
+        body: "The formulation is predicted but not yet measured. A trial makes a batch, compares the measurements with the interval published before the batch and names the probable cause of any miss.",
+        action: { label: "Run physical trial", hook: "trial" }
+      };
+    }
+    return {
+      tone: "info",
+      title: "Next step: plan the next version",
+      body: "The trial evidence is in. Planning corrects the measured process offset, rewrites the recipe under the brief's constraints and estimates the chance of a pass on the next batch.",
+      action: { label: "Plan next version", hook: "plan" }
+    };
+  }
 
   function renderProduct(id, tab) {
     tab = TABS.indexOf(tab) >= 0 ? tab : "overview";
@@ -555,6 +689,7 @@
     var efficiency = product.efficiency || {};
     var html = [];
 
+    html.push("<nav class='crumbs small muted' aria-label='Breadcrumb'><a href='#/products'>Products</a> <span>&rsaquo;</span> <span>" + esc(brief.product_name) + "</span></nav>");
     html.push("<div class='card'><div class='card-head'><div><h2>" + esc(brief.product_name) + "</h2>" +
       "<p class='card-sub'>" + esc(brief.category_label) + " &middot; " + num(brief.unit_weight_g, 0) + " g unit &middot; " + esc(brief.diet) +
       (brief.claims.length ? " &middot; claims: " + esc(brief.claims.join(", ")) : "") + "</p></div>" +
@@ -571,6 +706,15 @@
       "<dt>Predicted objective</dt><dd>" + (record ? num(record.objective, 3) : "-") + " <span class='muted small'>(priority-weighted geometric mean of desirability)</span></dd>" +
       "</dl></div>");
 
+    var step = nextStep(product, record);
+    html.push("<div class='next-step " + esc(step.tone) + "'><div class='next-step-text'><strong>" + esc(step.title) + "</strong><p class='small'>" + esc(step.body) + "</p></div>" +
+      (step.action
+        ? (step.action.href
+          ? "<a class='cta" + (step.tone === "warn" ? " primary" : "") + "' href='" + esc(step.action.href) + "'>" + esc(step.action.label) + "</a>"
+          : "<button class='" + (step.tone === "warn" ? "primary" : "") + "' data-action='" + esc(step.action.hook) + "'>" + esc(step.action.label) + "</button>")
+        : "") +
+      "</div>");
+
     html.push("<div class='tabs'>" + TABS.map(function (name) {
       return "<button data-tab='" + name + "'" + (name === tab ? " class='active'" : "") + ">" + name.charAt(0).toUpperCase() + name.slice(1) + "</button>";
     }).join("") + "</div>");
@@ -583,6 +727,7 @@
   function tabBody(tab, product, record) {
     if (tab === "overview") return tabOverview(product, record);
     if (tab === "prediction") return tabPrediction(product, record);
+    if (tab === "populations") return tabPopulations(product);
     if (tab === "trials") return tabTrials(product);
     if (tab === "plan") return tabPlan(product);
     if (tab === "process") return tabProcess(product);
@@ -683,12 +828,12 @@
     html.push("</tbody></table></div>");
     var evaluation = record.evaluation || {};
     html.push("<div class='grid halves' style='margin-top:.8rem'>" +
-      "<div><h4>Desirability against the targets</h4>" + Charts.gaugeBars((evaluation.rows || []).map(function (row) {
+      "<div><h4>Desirability against the targets</h4><div class='scroll'>" + Charts.gaugeBars((evaluation.rows || []).map(function (row) {
         return {
           label: row.label, value: row.value, target: row.target, score: row.desirability, status: row.status,
           digits: row.unit === "aw" || row.unit === "pH" ? 3 : 1
         };
-      })) + "</div>" +
+      })) + "</div></div>" +
       "<div><h4>Summary</h4><dl class='kv'>" +
       "<dt>Objective</dt><dd>" + num(evaluation.objective, 3) + "</dd>" +
       "<dt>Hard targets met</dt><dd>" + ((evaluation.rows || []).filter(function (r) { return r.hard && r.status === "on-target"; }).length) +
@@ -934,6 +1079,50 @@
     return html.join("");
   }
 
+  /* Population guidance: what one serving delivers to each group's daily need.
+   * The numbers are computed server-side from the ICMR-NIN reference set; this
+   * view only lays them out, and it always shows the reference value next to the
+   * percentage so no figure appears without its standard. */
+  function tabPopulations(product) {
+    var guide = product.populations || null;
+    if (!guide || !(guide.groups || []).length) {
+      return "<div class='card'><p class='muted'>No population guidance is available for this product yet.</p></div>";
+    }
+    var serving = guide.serving || {};
+    var html = ["<div class='card'><div class='card-head'><h3>Consumption guidance by population</h3><span class='card-sub'>" +
+      esc(guide.serving_label || "one serving") + "</span></div>"];
+    html.push("<dl class='kv'>" +
+      "<dt>Protein per serving</dt><dd><strong>" + num(serving.protein_g, 1) + " g</strong></dd>" +
+      "<dt>Energy per serving</dt><dd>" + num(serving.energy_kcal, 0) + " kcal</dd>" +
+      "<dt>Sugars per serving</dt><dd>" + num(serving.sugar_g, 1) + " g</dd>" +
+      "<dt>Protein energy share</dt><dd>" + num(guide.protein_energy_pct, 1) + " %</dd>" +
+      "</dl>" +
+      (guide.protein_energy_pct_note ? "<p class='small muted'>" + esc(guide.protein_energy_pct_note) + "</p>" : "") +
+      "</div>");
+    html.push("<div class='card'><div class='scroll'><table class='compact'><thead><tr>" +
+      "<th>Population</th><th class='num'>Daily requirement</th><th class='num'>Protein per serving</th>" +
+      "<th class='num'>% of requirement</th><th class='num'>Servings to reach it</th><th>Reading</th></tr></thead><tbody>");
+    (guide.groups || []).forEach(function (row) {
+      var klass = row.pct_rda_per_serving >= 50 ? "marginal" : (row.pct_rda_per_serving >= 20 ? "pass" : "monitored");
+      html.push("<tr><td><strong>" + esc(row.label) + "</strong><br><span class='small muted'>" + esc(row.age_range || "") +
+        " &middot; reference weight " + num(row.ref_weight_kg, 0) + " kg</span></td>" +
+        "<td class='num'>" + num(row.rda_g_day, 0) + " g<br><span class='small muted'>" + num(row.rda_g_kg_day, 2) + " g/kg</span></td>" +
+        "<td class='num'>" + num(row.protein_per_serving_g, 1) + " g</td>" +
+        "<td class='num'>" + tag(num(row.pct_rda_per_serving, 0) + "%", klass) + "</td>" +
+        "<td class='num'>" + num(row.servings_for_rda, 1) + "</td>" +
+        "<td class='small'>" + esc(row.reading || "") +
+        (row.suggested_target_g_day ? "<br><span class='small muted'>older-adult guidance target " + num(row.suggested_target_g_day, 0) + " g/day</span>" : "") +
+        (row.flags || []).map(function (flag) { return "<div class='callout warn small'>" + esc(flag) + "</div>"; }).join("") +
+        (row.cautions || []).map(function (caution) { return "<p class='small muted'>" + esc(caution) + "</p>"; }).join("") +
+        "</td></tr>");
+    });
+    html.push("</tbody></table></div>");
+    html.push("<p class='small muted'>Reference: " + esc(guide.source || "") + "</p>");
+    html.push("<p class='small muted'>" + esc(guide.disclaimer || "") + "</p>");
+    html.push("</div>");
+    return html.join("");
+  }
+
   function tabReport(product) {
     return "<div class='card'><div class='card-head'><h3>Development report</h3><span class='card-sub'>Generated from the record: brief, design, trials, diagnosis, changes, efficiency</span></div>" +
       "<div id='report-body'><p class='muted'>Loading...</p></div></div>";
@@ -971,8 +1160,7 @@
         location.hash = "#/product/" + productId + "/" + button.getAttribute("data-tab");
       });
     });
-    var loopButton = document.querySelector("[data-action='loop']");
-    if (loopButton) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-action='loop']"), function (loopButton) {
       loopButton.addEventListener("click", function () {
         var budget = prompt("How many physical trials may the closed loop use?", "6");
         if (!budget) return;
@@ -987,9 +1175,8 @@
           });
         });
       });
-    }
-    var predictButton = document.querySelector("[data-action='predict']");
-    if (predictButton) {
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-action='predict']"), function (predictButton) {
       predictButton.addEventListener("click", function () {
         withBusy("Predicting", "Recomputing every characteristic of the current version with the residual model fitted from the trials on record.", function () {
           return api("POST", "/api/products/" + productId + "/predict", {}).then(function () {
@@ -997,9 +1184,8 @@
           });
         });
       });
-    }
-    var trialButton = document.querySelector("[data-action='trial']");
-    if (trialButton) {
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-action='trial']"), function (trialButton) {
       trialButton.addEventListener("click", function () {
         withBusy("Running the physical trial", "Making a batch on the simulated line, measuring it and analysing the residuals against the interval published before the trial.", function () {
           return api("POST", "/api/products/" + productId + "/trials", {}).then(function (trial) {
@@ -1013,9 +1199,8 @@
           });
         });
       });
-    }
-    var planButton = document.querySelector("[data-action='plan']");
-    if (planButton) {
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-action='plan']"), function (planButton) {
       planButton.addEventListener("click", function () {
         withBusy("Planning the next version", "Fitting the residual model, compensating the measured process offset and re-optimising the formulation under the brief's constraints.", function () {
           return api("POST", "/api/products/" + productId + "/plans", {}).then(function (result) {
@@ -1026,7 +1211,7 @@
           });
         });
       });
-    }
+    });
     Array.prototype.forEach.call(document.querySelectorAll("[data-accept]"), function (button) {
       button.addEventListener("click", function () {
         var planId = Number(button.getAttribute("data-accept"));
@@ -1042,8 +1227,101 @@
     });
   }
 
+  /* ---------------------------------------------------------------- model */
+  function renderModel() {
+    setActiveNav("model");
+    view().innerHTML = "<div class='card'>Loading the acceptance model...</div>";
+    api("GET", "/api/model").then(function (payload) {
+      if (!payload.available) {
+        view().innerHTML = "<div class='card'><h2>Acceptance model</h2>" +
+          "<div class='empty'><p>" + esc(payload.note || "No model has been trained yet.") + "</p>" +
+          "<p class='small muted'>Train it offline, with no API key and no network: <code>python run.py --build-dataset</code>, then <code>python run.py --train</code>. The metrics appear here as soon as a bundle exists.</p>" +
+          "<p><a class='cta' href='#/guide'>How to use the app</a></p></div></div>";
+        return;
+      }
+      var metrics = payload.metrics || {};
+      var test = metrics.test || {};
+      var reg = test.regression || {};
+      var baseReg = test.baseline_regression || {};
+      var clf = test.classification || {};
+      var baseClf = test.baseline_classification || {};
+      var beats = metrics.beats_baseline || {};
+      var rows = metrics.rows || {};
+      var dataset = payload.dataset || {};
+      var provenance = dataset.provenance || {};
+      var html = ["<div class='card'><div class='card-head'><h2>Acceptance model</h2>" +
+        tag(payload.name + "/" + payload.version, "monitored") + "</div>" +
+        "<p class='card-sub'>A locally trained model that predicts how a formulation will score and whether it will pass. Trained offline on a versioned dataset - no API key, no network. Every number below is measured on the held-out test fold.</p>"];
+      html.push("<dl class='kv'>" +
+        "<dt>Dataset</dt><dd>" + esc(String(dataset.name || "")) + "/" + esc(String(dataset.version || "")) + " &middot; " + num(dataset.rows, 0) + " rows</dd>" +
+        "<dt>Split</dt><dd>by " + esc(String(metrics.split || "")) + " &middot; train " + num(rows.train, 0) + ", validation " + num(rows.validation, 0) + ", test " + num(rows.test, 0) + "</dd>" +
+        "<dt>Trained</dt><dd>" + esc(payload.created_at || "") + "</dd>" +
+        "<dt>Provenance</dt><dd class='small muted'>" + esc(provenance.note || provenance.source || "") + "</dd>" +
+        "</dl></div>");
+      html.push("<div class='grid halves'>");
+      html.push("<div class='card'><h3>Objective (ridge regression)</h3><div class='scroll'><table class='compact'><thead><tr><th>Metric</th><th class='num'>Model</th><th class='num'>Baseline</th></tr></thead><tbody>" +
+        "<tr><td>RMSE</td><td class='num'>" + num(reg.rmse, 4) + "</td><td class='num muted'>" + num(baseReg.rmse, 4) + "</td></tr>" +
+        "<tr><td>MAE</td><td class='num'>" + num(reg.mae, 4) + "</td><td class='num muted'>" + num(baseReg.mae, 4) + "</td></tr>" +
+        "<tr><td>R&sup2;</td><td class='num'>" + num(reg.r2, 3) + "</td><td class='num muted'>" + num(baseReg.r2, 3) + "</td></tr>" +
+        "</tbody></table></div></div>");
+      html.push("<div class='card'><h3>Pass / fail (calibrated logistic)</h3><div class='scroll'><table class='compact'><thead><tr><th>Metric</th><th class='num'>Model</th><th class='num'>Baseline</th></tr></thead><tbody>" +
+        "<tr><td>ROC-AUC</td><td class='num'>" + num(clf.roc_auc, 3) + "</td><td class='num muted'>" + num(baseClf.roc_auc, 3) + "</td></tr>" +
+        "<tr><td>Accuracy</td><td class='num'>" + num(clf.accuracy, 3) + "</td><td class='num muted'>" + num(baseClf.accuracy, 3) + "</td></tr>" +
+        "<tr><td>Brier score</td><td class='num'>" + num(clf.brier, 3) + "</td><td class='num muted'>" + num(baseClf.brier, 3) + "</td></tr>" +
+        "<tr><td>Base rate</td><td class='num'>" + num(clf.base_rate, 3) + "</td><td class='num muted'>-</td></tr>" +
+        "</tbody></table></div>" +
+        "<p class='small'>Beats the baseline - RMSE " + (beats.rmse ? "yes" : "no") + ", ROC-AUC " + (beats.roc_auc ? "yes" : "no") + ", Brier " + (beats.brier ? "yes" : "no") + ".</p></div>");
+      html.push("</div>");
+      var drivers = payload.drivers || [];
+      if (drivers.length) {
+        html.push("<div class='card'><h3>What drives the objective</h3><div class='scroll'><table class='compact'><thead><tr><th>Feature</th><th class='num'>Standardised coefficient</th></tr></thead><tbody>" +
+          drivers.map(function (row) {
+            return "<tr><td class='mono small'>" + esc(row.feature) + "</td><td class='num'>" + num(row.objective_coefficient, 4) + "</td></tr>";
+          }).join("") + "</tbody></table></div></div>");
+      }
+      view().innerHTML = html.join("");
+    }).catch(function (error) { fail(error); });
+  }
+
+  /* ---------------------------------------------------------------- guide */
+  function renderGuide() {
+    setActiveNav("guide");
+    if (!window.Guide) {
+      view().innerHTML = "<div class='card'><h3>Guide unavailable</h3><p class='small'>The guide script did not load. The rest of the interface is unaffected.</p></div>";
+      return;
+    }
+    // The guide renders from the same state the header and the benchmark view
+    // use, so its figures are live rather than copied into the prose.
+    view().innerHTML = Guide.render({
+      health: state.health,
+      cases: state.cases,
+      benchmark: state.benchmark,
+      products: state.products
+    });
+    // The contents links anchor within the page, so they must not reach the hash
+    // router: "#g-numbers" is not a route, and the router would render Products
+    // over the guide instead of scrolling to the section.
+    Array.prototype.forEach.call(view().querySelectorAll("a[href^='#g-']"), function (link) {
+      link.addEventListener("click", function (event) {
+        event.preventDefault();
+        var section = document.getElementById(link.getAttribute("href").slice(1));
+        if (!section) return;
+        // Instant rather than smooth: a contents link that does nothing when the
+        // compositor is off, or when the reader asked for reduced motion, is
+        // worse than one that jumps.
+        section.scrollIntoView({ block: "start" });
+        section.setAttribute("tabindex", "-1");
+        try { section.focus({ preventScroll: true }); } catch (error) { section.focus(); }
+      });
+    });
+  }
+
   /* --------------------------------------------------------------- router */
   function route() {
+    return routeInner().then(function (result) { focusView(); return result; });
+  }
+
+  function routeInner() {
     var hash = location.hash.replace(/^#\/?/, "");
     var parts = hash.split("/").filter(function (part) { return part !== ""; });
     var head = parts[0] || "products";
@@ -1051,6 +1329,8 @@
     if (head === "cases") { renderCases(); return Promise.resolve(); }
     if (head === "catalog") { renderCatalog(); return Promise.resolve(); }
     if (head === "benchmark") { renderBenchmark(); return Promise.resolve(); }
+    if (head === "model") { renderModel(); return Promise.resolve(); }
+    if (head === "guide" || head === "help" || head === "how") { renderGuide(); return Promise.resolve(); }
     if (head === "product") {
       var id = Number(parts[1]);
       var tab = parts[2] || "overview";
@@ -1074,10 +1354,15 @@
       api("GET", "/api/benchmark")
     ]).then(function (results) {
       setStatus(results[0]);
+      state.health = results[0];
       state.catalog = results[1];
       state.cases = results[2].cases;
       state.products = results[3].products;
       state.benchmark = results[4].benchmark;
+      // First visit and nothing on record: offer the guide and the case studies
+      // once, then remember the visit so the card does not nag.
+      state.welcome = !storageGet(VISITED_KEY) && state.products.length === 0;
+      storageSet(VISITED_KEY, "1");
       idle();
       window.addEventListener("hashchange", function () { route(); });
       if (!location.hash) location.hash = "#/products";

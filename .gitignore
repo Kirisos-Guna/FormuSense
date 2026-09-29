@@ -11,8 +11,14 @@ app/data/formusense.db-wal
 # Generated report figures (recreated with: python run.py --report)
 app/data/figures/
 
-# Dev-server access log
+# Built dataset and trained model (recreated offline, no API key needed):
+#   python run.py --build-dataset && python run.py --train
+app/data/datasets/
+app/data/models/
+
+# Dev-server access log and console output
 formusense.log
+formusense-web.out
 
 # Office lock files (~$name.docx) left behind while a document is open
 ~$*

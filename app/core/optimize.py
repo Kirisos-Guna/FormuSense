@@ -75,6 +75,10 @@ PLAUSIBILITY_FLOOR: Dict[str, Dict[str, float]] = {
     "extruded_snack": {"grain": 0.75, "protein": 0.55, "fat": 0.45, "salt": 0.45},
     "bar": {"base": 0.70, "protein": 0.55, "syrup": 0.70, "inclusion": 0.25},
     "sauce": {"base": 0.60, "sweetener": 0.25, "thickener": 0.55, "salt": 0.45, "spice_flavour": 0.50},
+    # A drink still needs its water and a real protein dose, but the protein slot
+    # has to be free to fall to the level that hits the protein target rather than
+    # the slot's nominal share, so the floor is light.
+    "beverage": {"water": 0.70, "protein": 0.45},
 }
 
 
@@ -316,7 +320,7 @@ def build_levers(
         ing = table.get(item.ingredient_id)
         if ing is None or item.pct < min_pct_to_move:
             continue
-        hi = ing.hard_max_pct if ing.hard_max_pct > 0 else 100.0
+        hi = _line_ceiling(ing, item.slot, cat)
         # Floor is zero, not the ingredient's min_pct: "minimum 0.05% citric
         # acid" describes a line that is used, and it forbids the far more
         # common decision - to leave the acid out of this formula entirely.
@@ -397,16 +401,33 @@ def build_levers(
     return levers
 
 
+def _line_ceiling(ing: kb.Ingredient, slot_id: str, cat: kb.Category) -> float:
+    """The highest percentage a single line may carry.
+
+    Two ceilings apply and the lower one wins: what the ingredient itself allows
+    (a legal or practical maximum) and what the slot it sits in allows. The slot
+    ceiling is what keeps water honest - process water has no intrinsic limit, a
+    biscuit's water slot caps it at 14%, and a drink's water slot lets it reach
+    92% - so an ingredient maximum alone cannot express both products.
+    """
+    ingredient_ceiling = ing.hard_max_pct if ing.hard_max_pct > 0 else 100.0
+    slot = cat.slot(slot_id)
+    if slot is None:
+        return ingredient_ceiling
+    return max(min(ingredient_ceiling, float(slot.max)), 0.0)
+
+
 def _fit_to_100(formulation: Formulation, slack_ingredients: Sequence[str] = ()) -> None:
     """Rescale lines so the formulation totals 100% inside every declared maximum."""
     table = kb.ingredients()
+    cat = kb.category(formulation.category)
     total = formulation.total_pct
     if total <= 0 or abs(total - 100.0) < 1e-9:
         return
     factor = 100.0 / total
     for item in formulation.items:
         ing = table.get(item.ingredient_id)
-        hi = (ing.hard_max_pct if ing and ing.hard_max_pct > 0 else 100.0)
+        hi = _line_ceiling(ing, item.slot, cat) if ing else 100.0
         item.pct = min(item.pct * factor, hi)
     residual = 100.0 - formulation.total_pct
     if abs(residual) < 1e-6:
@@ -429,7 +450,7 @@ def _fit_to_100(formulation: Formulation, slack_ingredients: Sequence[str] = ())
             if residual <= 1e-6:
                 break
             ing = table.get(item.ingredient_id)
-            hi = (ing.hard_max_pct if ing and ing.hard_max_pct > 0 else 100.0)
+            hi = _line_ceiling(ing, item.slot, cat) if ing else 100.0
             room = max(hi - item.pct, 0.0)
             if room <= 0:
                 continue

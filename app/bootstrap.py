@@ -19,8 +19,12 @@ Reduced-sugar        The kettle's steam line cannot boil off what the recipe
 mango spread         assumes, acid is dosed early into the open cook and the
 (spread)             syrup inverts a little extra. Moisture, pH and sugars
                      all drift away from the target.
+High-protein whey    The tubular heat exchanger's outlet runs below the
+beverage (beverage)  controller setpoint after fouling, so the drink is filled
+                     under-processed and its ambient shelf life is short; the
+                     minor premix scale over-delivers the mineral premix.
 
-The fourth entry is deliberately infeasible: it is there to demonstrate that the
+The fifth entry is deliberately infeasible: it is there to demonstrate that the
 agent says so, with numbers, instead of quietly producing a formula that misses a
 target.
 """
@@ -112,6 +116,37 @@ CASES: List[Dict[str, Any]] = [
             "tenth less water than the recipe assumes. Acid dosed early into the open kettle loses "
             "about a quarter of its strength with the steam, and the long hold at temperature "
             "inverts about 8% extra sugar."
+        ),
+    },
+    {
+        "key": "beverage",
+        "name": "High-protein whey beverage (ready-to-drink)",
+        "category": "beverage",
+        "diet": "vegetarian",
+        "claims": ["high_protein", "reduced_sugar"],
+        "unit_weight_g": 200.0,
+        "spec_text": (
+            "High-protein ready-to-drink whey beverage for the sports-nutrition and family-health "
+            "segment. 200 ml bottle. Protein 20 g per bottle (10 g per 100 ml); high protein claim, "
+            "vegetarian. Sugars not more than 6 g per 100 ml (reduced sugar). "
+            "Fat not more than 2 g per 100 ml. Shelf life 6 months at ambient with UHT and aseptic "
+            "fill. Ingredient cost target INR 320 per kg. Smooth, drinkable mouthfeel with a clean "
+            "label and no artificial colour."
+        ),
+        # The heat exchanger is the process lever on this line, so its fault is a
+        # temperature one: an 8 degC shortfall at the product outlet drops the
+        # drink under the sterilising threshold and the ambient shelf life fails.
+        "plant": {
+            "name": "Pilot plant E - UHT and aseptic filling line",
+            "temp_offset_c": -8.0,
+            "sodium_carry": 1.05,
+            "noise_scale": 1.12,
+        },
+        "plant_narrative": (
+            "The tubular heat exchanger's product outlet runs about 8 degC below the controller "
+            "setpoint after fouling, so the drink reaches the filler under-processed and its "
+            "ambient shelf life is not delivered. The minor-ingredient scale over-delivers the "
+            "mineral premix by roughly 5%. Both were found during commissioning."
         ),
     },
 ]

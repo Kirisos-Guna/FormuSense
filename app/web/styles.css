@@ -25,6 +25,7 @@
 
 body {
   margin: 0;
+  -webkit-text-size-adjust: 100%;
   background: var(--bg);
   color: var(--ink);
   font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -44,6 +45,8 @@ code, pre { font-family: var(--mono); font-size: .84rem; }
 .topbar {
   display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
   padding: .7rem 1.2rem; background: var(--panel);
+  padding-left: max(1.2rem, env(safe-area-inset-left));
+  padding-right: max(1.2rem, env(safe-area-inset-right));
   border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 30;
 }
 .brand { display: flex; align-items: center; gap: .7rem; }
@@ -68,12 +71,17 @@ code, pre { font-family: var(--mono); font-size: .84rem; }
 .pill.warn { background: var(--warn-soft); border-color: #efd7ad; color: var(--warn); }
 
 /* ------------------------------------------------------------------ layout */
-.view { padding: 1.2rem; max-width: 1400px; margin: 0 auto; }
+.view {
+  padding: 1.2rem; max-width: 1400px; margin: 0 auto;
+  padding-left: max(1.2rem, env(safe-area-inset-left));
+  padding-right: max(1.2rem, env(safe-area-inset-right));
+}
 .grid { display: grid; gap: 1rem; }
+.grid > * { min-width: 0; }
 .grid.two { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
 .grid.side { grid-template-columns: 280px minmax(0, 1fr); align-items: start; }
-.grid.halves { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-@media (max-width: 1000px) { .grid.two, .grid.side { grid-template-columns: 1fr; } }
+.grid.halves { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+@media (max-width: 1000px) { .grid.two, .grid.side { grid-template-columns: minmax(0, 1fr); } }
 
 .card {
   background: var(--panel); border: 1px solid var(--line);
@@ -143,7 +151,7 @@ td.name { min-width: 150px; }
 #view table td:last-child .small { padding: .14rem .4rem; font-size: .72rem; }
 td.mono { font-family: var(--mono); font-size: .8rem; }
 table.compact th, table.compact td { padding: .25rem .4rem; }
-.scroll { overflow-x: auto; }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* ------------------------------------------------------------------ states */
 .tag {
@@ -217,7 +225,8 @@ table.compact th, table.compact td { padding: .25rem .4rem; }
 }
 .busy-box {
   background: #fff; padding: 1.2rem 1.5rem; border-radius: var(--radius);
-  text-align: center; min-width: 280px; box-shadow: 0 12px 40px rgba(0,0,0,.18);
+  text-align: center; min-width: 280px; max-width: calc(100vw - 2rem);
+  box-shadow: 0 12px 40px rgba(0,0,0,.18);
 }
 .spinner {
   width: 30px; height: 30px; margin: 0 auto .6rem; border-radius: 50%;
@@ -236,4 +245,163 @@ table.compact th, table.compact td { padding: .25rem .4rem; }
 pre.code {
   background: #f7f9f7; border: 1px solid var(--line); border-radius: 8px;
   padding: .6rem .75rem; overflow-x: auto; max-height: 420px; margin: .4rem 0;
+}
+
+/* -------------------------------------------------- friendliness: links */
+/* A link that should read as a button, without a <form> or a script. */
+.cta {
+  display: inline-block; padding: .45rem .85rem; border-radius: 8px;
+  border: 1px solid var(--line-strong); background: #fff; color: var(--ink);
+  font-size: .9rem; font-weight: 500; white-space: nowrap;
+}
+.cta:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.cta.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.cta.primary:hover { background: #1a6741; color: #fff; }
+.chip {
+  font-size: .82rem; padding: .25rem .6rem; border-radius: 999px;
+  border: 1px dashed var(--line-strong); background: #fff; color: var(--muted);
+}
+.chip:hover { border-style: solid; border-color: var(--accent); color: var(--accent); }
+.examples { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin: -.2rem 0 .8rem; }
+
+/* ------------------------------------------------------------ disclosure */
+details.advanced > summary {
+  cursor: pointer; font-size: .88rem; color: var(--muted); padding: .3rem 0;
+}
+details.advanced > summary:hover { color: var(--accent); }
+details.advanced[open] > summary { margin-bottom: .5rem; }
+details.advanced > summary::marker { color: var(--accent); }
+
+/* ------------------------------------------------------- welcome + empty */
+.welcome {
+  border: 1px solid #bfe0cd; background: var(--accent-soft); border-radius: var(--radius);
+  padding: .9rem 1rem; margin: .2rem 0 1rem;
+}
+.welcome h3 { margin-top: 0; }
+.welcome p { margin: .3rem 0 .7rem; }
+.empty {
+  border: 1px dashed var(--line-strong); border-radius: var(--radius);
+  background: #fbfcfb; padding: 1.1rem 1.2rem; margin: .4rem 0;
+}
+.empty p { margin: .2rem 0 .6rem; }
+
+/* ----------------------------------------------------------- next step */
+.crumbs { margin: 0 0 .5rem; }
+.crumbs a { color: var(--muted); }
+.next-step {
+  display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  border: 1px solid var(--line); border-left: 4px solid var(--info); background: var(--info-soft);
+  border-radius: 0 8px 8px 0; padding: .6rem .85rem; margin: 0 0 1rem;
+}
+.next-step.good { border-left-color: var(--accent); background: var(--accent-soft); }
+.next-step.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.next-step-text { min-width: 0; flex: 1 1 320px; }
+.next-step-text p { margin: .2rem 0 0; }
+
+/* ---------------------------------------------------------------- guide */
+.guide-head .guide-facts {
+  list-style: none; display: flex; flex-wrap: wrap; gap: .4rem 1.6rem;
+  margin: .8rem 0 0; padding: 0; font-size: .84rem; color: var(--muted);
+}
+.guide-facts li span { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.guide-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.guide-toc { position: sticky; top: 5.4rem; }
+.guide-toc h4 { margin: 0 0 .4rem; }
+.guide-toc ul { margin-left: 0; list-style: none; }
+.guide-toc li { margin: .22rem 0; }
+/* The grid item has to be allowed to shrink, or a wide table inside one of the
+   guide's sections widens the whole page instead of scrolling in place. */
+.guide-body { min-width: 0; }
+.guide-section { scroll-margin-top: 5.4rem; }
+.guide-section h3 { margin-top: 0; }
+.steps { counter-reset: step; list-style: none; margin: 0; padding: 0; }
+.steps > li { border-top: 1px solid var(--line); padding: .7rem 0; }
+.steps > li:first-child { border-top: none; padding-top: .2rem; }
+.step-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.step-text { min-width: 0; flex: 1 1 320px; }
+.step-text p { margin: .2rem 0 0; color: var(--muted); font-size: .9rem; }
+.loop-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .6rem; }
+.loop-step { border: 1px solid var(--line); border-radius: 8px; padding: .55rem .65rem; background: #fbfcfb; }
+.loop-step p { margin: .25rem 0 0; }
+.step-badge {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: .45rem;
+  border-radius: 50%; background: var(--accent); color: #fff; font-size: .76rem; font-weight: 700;
+}
+.glossary dt { font-weight: 600; color: var(--ink); }
+.glossary dd { margin-bottom: .35rem; }
+
+/* ------------------------------------------------------- focus + motion */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 100;
+  background: var(--accent); color: #fff; padding: .5rem .8rem; border-radius: 0 0 8px 0;
+}
+.skip-link:focus { left: 0; }
+.help-button {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid var(--line-strong); background: #fff; color: var(--muted);
+  font-weight: 700; font-size: .86rem;
+}
+.help-button:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+
+/* ------------------------------------------------------- narrow screens */
+@media (max-width: 780px) {
+  .view { padding: .8rem; }
+  .topbar { gap: .6rem; padding: .6rem .8rem; }
+  .mainnav { order: 3; width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: .2rem; }
+  .mainnav a { white-space: nowrap; }
+  .status { margin-left: auto; }
+  .guide-layout { grid-template-columns: minmax(0, 1fr); }
+  .guide-toc { position: static; }
+  .kv { grid-template-columns: 1fr; gap: 0 .4rem; }
+  .kv dt { margin-top: .35rem; }
+  button, .cta { padding: .5rem .8rem; }
+}
+
+/* ------------------------------------------------------- phones (<=560px) */
+@media (max-width: 560px) {
+  .view { padding: .8rem .7rem 2rem; }
+  .topbar { padding: .55rem .7rem; gap: .5rem; }
+  .only-wide { display: none; }
+  .brand { gap: .55rem; }
+  .brand h1 { font-size: 1rem; }
+  .brand p { font-size: .72rem; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; font-size: 1rem; }
+  .status { gap: .3rem; }
+  .pill { font-size: .68rem; padding: .18rem .45rem; }
+  .help-button { width: 26px; height: 26px; }
+  .mainnav { gap: .1rem; }
+  .mainnav a { display: flex; align-items: center; min-height: 40px; padding: .3rem .55rem; font-size: .85rem; }
+  .card { padding: .8rem .75rem; }
+  .card-head { gap: .35rem; }
+  .card-head .row { width: 100%; }
+  .card-head .row > button, .card-head .row > .cta { flex: 1 1 auto; text-align: center; }
+  /* One scrollable strip rather than three wrapped rows of tabs. */
+  .tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* The strip is obviously scrollable from the cut-off item; a raw scrollbar
+     under it just eats vertical space on a phone. Table scroll containers
+     keep theirs, because there it is the affordance. */
+  .mainnav, .tabs { scrollbar-width: none; }
+  .mainnav::-webkit-scrollbar, .tabs::-webkit-scrollbar { height: 0; }
+  .tabs button { flex: 0 0 auto; min-height: 40px; padding: .45rem .6rem; font-size: .85rem; }
+  button, .cta { padding: .55rem .75rem; min-height: 42px; }
+  button.small { min-height: 0; padding: .25rem .5rem; }
+  /* 16px keeps iOS from zooming the page when a field is focused. */
+  input[type=text], input[type=number], textarea, select { font-size: 16px; }
+  table { font-size: .82rem; }
+  th, td { padding: .3rem .35rem; }
+  .kv dd { overflow-wrap: anywhere; }
+  .loop-strip { grid-template-columns: 1fr; }
+  .steps > li { padding: .55rem 0; }
+  .step-row { flex-direction: column; align-items: stretch; gap: .5rem; }
+  .step-row .cta { width: 100%; text-align: center; }
+  .guide-facts { gap: .3rem .9rem; }
+  .examples { gap: .3rem; }
+  .thumbs img { width: 68px; height: 68px; }
+  .file-drop { padding: .7rem .6rem; }
+  .busy-box { min-width: 0; width: calc(100vw - 2rem); padding: 1rem; }
+  .toast { max-width: 92vw; bottom: .8rem; }
 }

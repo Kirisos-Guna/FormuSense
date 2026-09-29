@@ -25,10 +25,22 @@ from . import plant as plant_module
 from .core import brief as brief_module
 from .core import diagnose as diagnose_module
 from .core import doe as doe_module
-from .core import engine, formulate, kb, kpi as kpi_registry, process as process_module, reformulate, vision
+from .core import (
+    engine,
+    formulate,
+    kb,
+    kpi as kpi_registry,
+    population as population_module,
+    process as process_module,
+    reformulate,
+    vision,
+)
 from .core.surrogate import SurrogateSet
 from .core.types import Brief, Formulation, Item, TrialResult
 from .store import Store, prediction_accuracy
+
+_UNSET = object()
+_ACCEPTANCE_BUNDLE: Any = _UNSET
 
 DEFAULT_PLANT = {
     "name": "Pilot plant (default)",
@@ -210,6 +222,36 @@ class AgentService:
             "efficiency": self.efficiency(product_id),
             "ledger": self.store.entries(product_id, limit=60),
             "predictions_by_version": predictions_by_version,
+            "populations": self.population_guide(product_id),
+        }
+
+    def population_guide(self, product_id: int, version: Optional[int] = None) -> Dict[str, Any]:
+        """What one serving contributes to each population group's protein need.
+
+        Computed from the values that are on record for the version (not from a
+        fresh prediction), so the guidance the UI shows is the guidance that was
+        published alongside the formulation.
+        """
+        product = self.store.product(product_id)
+        if product is None:
+            raise KeyError(f"Unknown product {product_id}")
+        brief = _brief_from_payload(product["brief"])
+        formulation = self.store.formulation(product_id, version)
+        if formulation is None:
+            raise KeyError(f"No formulation for product {product_id}")
+        record = self.store.prediction_for_version(product_id, formulation.version)
+        values = dict((record or {}).get("values") or {})
+        if not values:
+            values = engine.predict(formulation, brief).values
+        serving_g = float(brief.unit_weight_g or 100.0)
+        guide = _population_from_values(values, serving_g, brief.category)
+        return {
+            "product_id": product_id,
+            "version": formulation.version,
+            "category": brief.category,
+            "category_label": kb.category(brief.category).label,
+            "unit_weight_g": round(serving_g, 2),
+            **guide,
         }
 
     def predict(
@@ -264,6 +306,10 @@ class AgentService:
             "conflicts": conflicts,
             "surrogate": surrogate.report() if surrogate else None,
             "process": process_module.summary(formulation, brief),
+            "population": _population_from_values(
+                result.values, float(brief.unit_weight_g or 100.0), brief.category
+            ),
+            "learned_acceptance": self.learned_acceptance(formulation),
         }
 
     # ------------------------------------------------------------- 3. trial #
@@ -617,6 +663,53 @@ class AgentService:
             "measured_objective": round(objective, 4),
         }
 
+    # ------------------------------------------------- learned acceptance #
+    def acceptance_model(self) -> Optional[Any]:
+        """The trained acceptance model, loaded once per process.
+
+        Loaded lazily and cached at module level: the model file is small and does
+        not change while the process runs, and the alternative - reading and
+        parsing it on every prediction - would put file I/O in the hot path.
+        """
+        global _ACCEPTANCE_BUNDLE
+        if _ACCEPTANCE_BUNDLE is _UNSET:
+            try:
+                from .ml.registry import latest_bundle
+
+                _ACCEPTANCE_BUNDLE = latest_bundle()
+            except Exception:  # pragma: no cover - a missing model must not break the app
+                _ACCEPTANCE_BUNDLE = None
+        return _ACCEPTANCE_BUNDLE  # type: ignore[return-value]
+
+    def learned_acceptance(self, formulation: Formulation) -> Dict[str, Any]:
+        """The learned model's view of a formulation, alongside the physical one.
+
+        This is deliberately advisory: it is reported next to the physics-based
+        pass probability, never substituted for it, and it says so when no model
+        has been trained.
+        """
+        bundle = self.acceptance_model()
+        if bundle is None:
+            return {
+                "available": False,
+                "note": "no trained acceptance model; run: python run.py --build-dataset && python run.py --train",
+            }
+        scored = bundle.predict(formulation)
+        test = (bundle.metrics or {}).get("test", {})
+        return {
+            "available": True,
+            "trained": f"{bundle.name}/{bundle.version}",
+            "created_at": bundle.created_at,
+            "dataset": bundle.dataset,
+            "metrics": {
+                "regression": test.get("regression", {}),
+                "classification": test.get("classification", {}),
+                "beats_baseline": (bundle.metrics or {}).get("beats_baseline", {}),
+            },
+            "drivers": bundle.driver_notes(),
+            **scored,
+        }
+
     # ------------------------------------------------------------- helpers #
     def _surrogate(self, product_id: int) -> Optional[SurrogateSet]:
         product = self.store.product(product_id)
@@ -708,3 +801,36 @@ def _cause_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def nutrition_claim_check(result, brief: Brief) -> Dict[str, Any]:
     return engine.claim_check(result, brief)
+
+
+def _population_from_values(values: Dict[str, Any], serving_g: float, category: str) -> Dict[str, Any]:
+    """Build the population guidance payload from a per-100 g value set."""
+    factor = max(float(serving_g), 0.0) / 100.0
+
+    def per_serving(kpi_id: str) -> float:
+        try:
+            return float(values.get(kpi_id) or 0.0) * factor
+        except (TypeError, ValueError):
+            return 0.0
+
+    if category == "beverage":
+        label = f"one {serving_g:.0f} g serving (about {serving_g:.0f} ml)"
+    else:
+        label = f"one {serving_g:.0f} g serving"
+    guide = population_module.guidance(
+        per_serving("protein_g"),
+        serving_label=label,
+        energy_per_serving_kcal=per_serving("energy_kcal"),
+        sugar_per_serving_g=per_serving("sugar_g"),
+        sodium_per_serving_mg=per_serving("sodium_mg"),
+    )
+    guide["serving"] = {
+        "serving_g": round(float(serving_g), 2),
+        "protein_g": round(per_serving("protein_g"), 3),
+        "energy_kcal": round(per_serving("energy_kcal"), 2),
+        "sugar_g": round(per_serving("sugar_g"), 3),
+        "fat_g": round(per_serving("fat_g"), 3),
+        "fibre_g": round(per_serving("fibre_g"), 3),
+        "sodium_mg": round(per_serving("sodium_mg"), 2),
+    }
+    return guide

@@ -94,6 +94,11 @@ CATEGORY_KPIS: Dict[str, List[str]] = {
         "water_activity", "ph", "shelf_life_days", "consistency_index", "mould_risk",
         "cost_inr_kg", "cost_inr_unit",
     ],
+    "beverage": [
+        "energy_kcal", "protein_g", "protein_energy_pct", "fat_g", "satfat_g", "carb_g", "sugar_g",
+        "sodium_mg", "moisture_pct", "water_activity", "ph", "shelf_life_days", "consistency_index",
+        "processability_score", "oxidation_risk", "mould_risk", "cost_inr_kg", "cost_inr_unit",
+    ],
 }
 
 

@@ -83,7 +83,9 @@ def predict(
     values.update(texture_values)
     methods["texture"] = texture_note
 
-    stability_values, stability_note = physical.predict_stability(comp, aw, ph, formulation.category)
+    stability_values, stability_note = physical.predict_stability(
+        comp, aw, ph, formulation.category, params
+    )
     values.update({k: v for k, v in stability_values.items() if k in kpi_registry.KPI_DEFS})
     methods["stability"] = stability_note
 
@@ -126,6 +128,11 @@ def predict(
             )
         )
 
+    # Serving and per-100 ml figures are presentation of the same composition,
+    # and they are cheap, so they ride along with every prediction. Population
+    # guidance is deliberately *not* computed here: this function is on the
+    # optimiser's inner loop and is called thousands of times per plan.
+    serving_rows = comp.per_serving(unit_weight)
     details: Dict[str, Any] = {
         "methods": methods,
         "manufacturability_drivers": drivers,
@@ -135,6 +142,13 @@ def predict(
         "concentration_factor": comp.aggregates["concentration_factor"],
         "surrogate_note": surrogate_note,
         "calibration_samples": calibration_samples,
+        "density_g_per_ml": round(comp.density_g_per_ml, 4),
+        "is_liquid": comp.is_liquid,
+        "serving_g": round(float(unit_weight), 2),
+        "serving": {k: round(v, 3) for k, v in serving_rows.items()},
+        "per_100ml": (
+            {k: round(v, 3) for k, v in comp.per_100ml().items()} if comp.is_liquid else None
+        ),
     }
     return PredictionResult(
         values=values,

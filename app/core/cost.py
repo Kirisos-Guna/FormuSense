@@ -15,6 +15,9 @@ PROCESS_ENERGY_KWH_PER_KG = {
     "extruded_snack": 1.10,
     "bar": 0.80,
     "sauce": 0.90,
+    # UHT + aseptic filling is energy-light per kg against a bakery line, but the
+    # aseptic zone and clean-in-place carry real utility cost.
+    "beverage": 0.85,
 }
 # Labour + utilities + overhead, INR per kg of finished product at pilot scale.
 CONVERSION_OVERHEAD_INR_PER_KG = {
@@ -24,9 +27,13 @@ CONVERSION_OVERHEAD_INR_PER_KG = {
     "extruded_snack": 20.0,
     "bar": 26.0,
     "sauce": 16.0,
+    "beverage": 30.0,
 }
 # Packaging: primary pack cost as a function of net weight (INR per unit).
-PACK_BASE_INR = {"cookie": 2.2, "spread": 9.0, "drymix": 3.4, "extruded_snack": 3.0, "bar": 2.6, "sauce": 10.0}
+PACK_BASE_INR = {
+    "cookie": 2.2, "spread": 9.0, "drymix": 3.4, "extruded_snack": 3.0, "bar": 2.6,
+    "sauce": 10.0, "beverage": 11.0,
+}
 
 
 def ingredient_cost(formulation) -> Dict[str, object]:

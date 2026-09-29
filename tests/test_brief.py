@@ -82,6 +82,8 @@ class TargetTests(unittest.TestCase):
             "cookie": {"protein_g": 12.0, "fibre_g": 7.0, "sugar_g": 12.0, "cost_inr_kg": 240.0},
             "spread": {"sugar_g": 40.0, "water_activity": 0.90, "ph": 3.6, "cost_inr_kg": 160.0},
             "conflict_demo": {"protein_g": 15.0, "fibre_g": 4.0, "moisture_pct": 5.0},
+            # A per-bottle number is converted onto the per-100 g basis the models use.
+            "beverage": {"protein_g": 10.0, "sugar_g": 6.0, "shelf_life_days": 180.0, "cost_inr_kg": 320.0},
         }
         for case in list(CASES) + [INFEASIBLE_CASE]:
             with self.subTest(case=case["key"]):

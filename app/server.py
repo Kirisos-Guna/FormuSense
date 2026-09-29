@@ -35,7 +35,10 @@ from urllib.parse import unquote, urlparse
 
 from . import benchmark as benchmark_module
 from .bootstrap import CASES, INFEASIBLE_CASE, seed_all
-from .core import kb, kpi as kpi_registry, vision
+from .config import settings
+from .core import kb, kpi as kpi_registry, population as population_module, vision
+from .logging_setup import configure_logging, logger, new_request_id, summarise_path
+from .db import driver_available, migration_status
 from .service import AgentService
 from .store import Store
 
@@ -235,7 +238,75 @@ def r_health(service: AgentService, body: Dict[str, Any], params: Dict[str, str]
         "ingredients": len(kb.ingredients()),
         "vision": vision.vision_available(),
         "benchmark": bool(service.store.latest_benchmark()),
+        "database": getattr(service.store, "dialect", "sqlite"),
+        "acceptance_model": bool(service.acceptance_model()),
+        "population_groups": len(population_module.profiles()),
     }
+
+
+@_GET("/api/config")
+def r_config(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """The non-secret runtime configuration, so the UI can label the environment."""
+    return {"settings": settings().as_dict()}
+
+
+@_GET("/api/db/status")
+def r_db_status(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """Which database is in use, whether its driver is present, and its migrations."""
+    current = settings()
+    available, driver_note = driver_available(current.db_url)
+    status = migration_status(service.store.conn, getattr(service.store, "dialect", "sqlite"))
+    return {
+        "database": current.as_dict(),
+        "driver": {"available": available, "detail": driver_note},
+        "migrations": status,
+    }
+
+
+@_GET("/api/ready")
+def r_ready(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """Readiness: the record must be readable, not merely the process alive."""
+    try:
+        products = service.store.products()
+    except Exception as exc:  # noqa: BLE001 - readiness must answer, not raise
+        return {"ready": False, "reason": f"{type(exc).__name__}: {exc}"}
+    return {"ready": True, "products": len(products)}
+
+
+@_GET("/api/model")
+def r_model(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """The trained acceptance model's provenance and out-of-sample metrics."""
+    bundle = service.acceptance_model()
+    if bundle is None:
+        return {
+            "available": False,
+            "note": "No trained model. Build and train it with: python run.py --build-dataset && python run.py --train",
+        }
+    return {
+        "available": True,
+        "name": bundle.name,
+        "version": bundle.version,
+        "created_at": bundle.created_at,
+        "dataset": bundle.dataset,
+        "metrics": bundle.metrics,
+        "drivers": bundle.driver_notes(),
+    }
+
+
+@_GET("/api/populations")
+def r_populations_catalog(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """The population reference set, with its source and disclaimer."""
+    return {
+        "summary": population_module.summary(),
+        "source": population_module.source_note(),
+        "groups": [p.as_dict() for p in population_module.profiles()],
+    }
+
+
+@_GET("/api/products/{product_id}/populations")
+def r_product_populations(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """What one serving contributes to each population group's protein need."""
+    return service.population_guide(_int(params["product_id"], "product_id"))
 
 
 @_GET("/api/catalog")
@@ -430,8 +501,12 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "FormuSense/1.0"
     protocol_version = "HTTP/1.1"
 
+    def _request_id(self) -> str:
+        return str(getattr(self, "_rid", ""))
+
     # ------------------------------------------------------------------ verbs #
     def do_GET(self) -> None:  # noqa: N802 - required name
+        self._rid = new_request_id()
         path, query = self._split()
         if path.startswith("/api/"):
             self._api("GET", path, query, {})
@@ -439,6 +514,7 @@ class Handler(BaseHTTPRequestHandler):
             self._static(path, query)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._rid = new_request_id()
         path, query = self._split()
         body = self._body()
         if path.startswith("/api/"):
@@ -447,6 +523,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "Only /api routes accept POST."}, 405)
 
     def do_DELETE(self) -> None:  # noqa: N802
+        self._rid = new_request_id()
         path, query = self._split()
         if path.startswith("/api/"):
             self._api("DELETE", path, query, {})
@@ -454,7 +531,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": f"Not found: {path}"}, 404)
 
     # ---------------------------------------------------------------- routing #
+    def _authorised(self) -> bool:
+        """Optional bearer-token auth for write routes.
+
+        Off by default so the local demo is frictionless; set
+        ``FORMUSENSE_AUTH_TOKEN`` to require it. Reads stay open either way.
+        """
+        token = settings().auth_token
+        if not token:
+            return True
+        header = str(self.headers.get("Authorization") or "").strip()
+        return header in (f"Bearer {token}", token)
+
     def _api(self, method: str, path: str, query: Dict[str, List[str]], body: Dict[str, Any]) -> None:
+        if method in ("POST", "DELETE") and not self._authorised():
+            self._send_json(
+                {"error": "Unauthorised: this instance requires a bearer token.", "kind": "unauthorised"},
+                401,
+            )
+            return
         matched = ROUTER.match(method, path)
         if matched is None:
             self._send_json({"error": f"No such endpoint: {method} {path}"}, 404)
@@ -538,14 +633,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Request-ID", self._request_id())
         self.end_headers()
         self.wfile.write(data)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         # One line per request, but only for the routes worth watching: a page load
-        # fires a dozen asset requests and they bury everything else.
+        # fires a dozen asset requests and they bury everything else. The request
+        # id ties the line to the response header, so a browser network entry can
+        # be matched to a server log line.
+        if not settings().log_requests:
+            return
         if "/api/" in f"{self.path}":
-            BaseHTTPRequestHandler.log_message(self, fmt, *args)
+            logger().info("[%s] %s %s", self._request_id(), summarise_path(self.path), str(args[-1] if args else ""))
 
 
 def _parse_query(query: str) -> Dict[str, List[str]]:
@@ -567,6 +667,7 @@ class Server(ThreadingHTTPServer):
 
 def serve(host: str = "127.0.0.1", port: int = 8770, banner: bool = True) -> None:
     """Run the API and UI until interrupted."""
+    configure_logging(settings().log_level)
     httpd = Server((host, port), Handler)
     shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
     if banner:

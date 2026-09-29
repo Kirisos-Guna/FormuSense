@@ -1,0 +1,41 @@
+# The production shape: the application talking to a real PostgreSQL server.
+#    docker compose up --build
+# The app then runs at http://127.0.0.1:8770 with FORMUSENSE_DB_URL pointed at
+# the database service, and the schema is migrated automatically on startup.
+# With no compose file at all, the app still runs on the bundled SQLite file.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: formu
+      POSTGRES_PASSWORD: formu
+      POSTGRES_DB: formusense
+    volumes:
+      - formusense-pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U formu -d formusense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      FORMUSENSE_DB_URL: postgresql://formu:formu@db:5432/formusense
+      FORMUSENSE_HOST: 0.0.0.0
+      FORMUSENSE_PORT: "8770"
+      # Set a token to require Authorization: Bearer <token> on write routes.
+      FORMUSENSE_AUTH_TOKEN: ${FORMUSENSE_AUTH_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8770:8770"
+    volumes:
+      - ./app/data:/app/app/data
+      - ./report:/app/report
+
+volumes:
+  formusense-pgdata:

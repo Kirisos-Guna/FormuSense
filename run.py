@@ -9,6 +9,12 @@ Runs on the Python standard library only::
     python run.py --seed         # re-seed the demonstration cases and exit
     python run.py --benchmark    # run the trial-efficiency benchmark and exit
     python run.py --report       # write the internship report and exit
+    python run.py --slides       # write the presentation (PPTX) and exit
+    python run.py --slides --preview  # ...and an HTML rendition to look at it in a browser
+    python run.py --build-dataset  # build the acceptance dataset (offline, no API key)
+    python run.py --train          # train and evaluate the acceptance model
+    python run.py --train-report   # print the metrics of the latest trained model
+    python run.py --db-migrate     # apply pending database migrations
 """
 from __future__ import annotations
 
@@ -44,16 +50,116 @@ def main() -> int:
         help="write the internship report (DOCX, HTML, Markdown) from the record, then exit",
     )
     parser.add_argument(
+        "--slides",
+        action="store_true",
+        help="write the presentation (PPTX) from the record, then exit",
+    )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="also write an HTML rendition of the presentation, to review it in a browser",
+    )
+    parser.add_argument(
         "--out",
         default=None,
-        help="directory for --report (default: report/)",
+        help="directory for --report and --slides (default: report/)",
     )
     parser.add_argument(
         "--no-tests",
         action="store_true",
-        help="skip the test-suite run while building the report",
+        help="skip the test-suite run while building the report or the slides",
+    )
+    parser.add_argument(
+        "--build-dataset",
+        action="store_true",
+        help="build the acceptance-model dataset from the simulated plant, then exit",
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="train and evaluate the acceptance model on the dataset, then exit",
+    )
+    parser.add_argument(
+        "--train-report",
+        action="store_true",
+        help="print the metrics of the most recently trained model, then exit",
+    )
+    parser.add_argument(
+        "--variants",
+        type=int,
+        default=60,
+        help="formulation variants per category when building the dataset (default: 60)",
+    )
+    parser.add_argument(
+        "--dataset-seed",
+        type=int,
+        default=7,
+        help="seed for dataset generation (default: 7)",
+    )
+    parser.add_argument(
+        "--model-version",
+        default="v1",
+        help="version tag for a trained model bundle (default: v1)",
+    )
+    parser.add_argument(
+        "--db-migrate",
+        action="store_true",
+        help="apply pending database migrations and report the schema status, then exit",
     )
     args = parser.parse_args()
+
+    if args.db_migrate:
+        from app.db.migrate import migration_status
+        from app.store import Store
+
+        store = Store()
+        try:
+            status = migration_status(store.conn, store.dialect)
+            print(f"  database : {store.db_url}")
+            print(f"  dialect  : {store.dialect}")
+            print(f"  applied  : {', '.join(status['applied']) or 'none'}")
+            print(f"  pending  : {', '.join(status['pending']) or 'none'}")
+        finally:
+            store.close()
+        return 0
+
+    if args.build_dataset:
+        from app.ml.dataset import build_and_write
+
+        print(f"Building the acceptance dataset ({args.variants} variants per category)...")
+        ref = build_and_write(variants_per_category=args.variants, seed=args.dataset_seed)
+        print(f"  dataset : {ref.name}/{ref.version}")
+        print(f"  rows    : {ref.rows_path}")
+        return 0
+
+    if args.train:
+        from app.ml.train import format_training_report, train_acceptance
+
+        print("Training the acceptance model (no network, no API key)...")
+        report = train_acceptance(version=args.model_version)
+        print(format_training_report(report))
+        return 0
+
+    if args.train_report:
+        from app.ml.registry import latest_bundle
+        from app.ml.train import format_training_report
+
+        bundle = latest_bundle()
+        if bundle is None:
+            print("No trained model found. Run: python run.py --build-dataset && python run.py --train")
+            return 1
+        print(
+            format_training_report(
+                {
+                    "name": bundle.name,
+                    "version": bundle.version,
+                    "dataset": bundle.dataset,
+                    "metrics": bundle.metrics,
+                    "drivers": bundle.driver_notes(),
+                }
+            )
+        )
+        return 0
 
     if args.seed:
         from app.bootstrap import seed_all
@@ -90,6 +196,26 @@ def main() -> int:
         print(f"  listings : {result['listings']}")
         for kind, path in result["paths"].items():
             print(f"  {kind:8s} : {path}")
+        return 0
+
+    if args.slides:
+        from pathlib import Path as _Path
+
+        from app.slides import generate
+
+        print("Building the presentation from the record...")
+        result = generate(
+            out_dir=_Path(args.out) if args.out else None,
+            run_tests=not args.no_tests,
+        )
+        print(f"  slides   : {result['slides']}")
+        for title in result["outline"]:
+            print(f"    - {title}")
+        print(f"  pptx     : {result['path']}")
+        if args.preview:
+            from app.slides_html import write as write_preview
+
+            print(f"  html     : {write_preview(result['path'])}")
         return 0
 
     from app.server import serve

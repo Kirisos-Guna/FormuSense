@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 from app import server
+from app.bootstrap import CASES
 from app.service import AgentService
 from app.store import Store
 
@@ -68,9 +69,10 @@ class CatalogTests(unittest.TestCase):
 
     def test_the_case_studies_are_offered_with_their_plant_story(self) -> None:
         cases = server.cases()
-        self.assertEqual(len(cases), 4)
+        # Every seeded case is offered, plus the planted conflict demonstration.
+        self.assertEqual(len(cases), len(CASES) + 1)
         feasible = [case for case in cases if case["feasible"]]
-        self.assertEqual(len(feasible), 3)
+        self.assertEqual(len(feasible), len(CASES))
         for case in cases:
             self.assertTrue(case["narrative"])
             self.assertIn("spec_text", case["payload"])

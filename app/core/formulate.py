@@ -101,6 +101,19 @@ PREFERRED: Dict[str, Dict[str, List[str]]] = {
         "spice_flavour": ["spice_masala", "onion_powder", "beetroot_powder", "cocoa_powder", "fruit_flavour", "vanilla_flavour"],
         "preservative": ["potassium_sorbate", "sodium_benzoate", "calcium_propionate", "ascorbic_acid"],
     },
+    "beverage": {
+        "water": ["water"],
+        # Whey first: it is the protein a ready-to-drink line actually hydrates.
+        "protein": ["whey_protein_concentrate", "soy_protein_isolate", "skim_milk_powder", "whey_powder", "whole_milk_powder", "defatted_soy_flour", "egg_white_powder"],
+        "dairy": ["milk_toned", "skim_milk_powder", "whey_powder", "curd", "whole_milk_powder"],
+        "sweetener": ["stevia_reba", "sucralose", "erythritol", "sugar", "fructose", "glucose_syrup", "maltodextrin", "sorbitol"],
+        "fat": ["palm_oil", "sunflower_oil", "cocoa_butter", "butter", "ghee", "rice_bran_oil"],
+        "stabiliser": ["carrageenan", "xanthan_gum", "cmc", "pectin_lm", "guar_gum"],
+        "acidulant": ["citric_acid", "malic_acid", "lactic_acid", "tartaric_acid", "sodium_citrate", "ascorbic_acid"],
+        "flavour": ["cocoa_powder", "vanilla_flavour", "fruit_flavour", "beetroot_powder"],
+        "preservative": ["potassium_sorbate", "sodium_benzoate", "ascorbic_acid"],
+        "fortificant": ["vitamin_premix", "calcium_carbonate"],
+    },
 }
 
 # Which KPI a slot is primarily responsible for; used to bias ingredient choice.
@@ -124,6 +137,7 @@ SLOT_KPI: Dict[str, str] = {
     "salt": "sodium_mg",
     "spice_flavour": "sodium_mg",
     "humectant": "water_activity",
+    "stabiliser": "consistency_index",
 }
 
 

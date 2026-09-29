@@ -20,93 +20,30 @@ Two parts of this schema are worth more than the rest:
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .config import settings as _settings, sqlite_path_from_url
 from .core.types import Brief, Formulation, Item, TrialResult
+from .db import apply_migrations, connect
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = ROOT / "data" / "formusense.db"
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    category TEXT NOT NULL,
-    brief_json TEXT NOT NULL,
-    plant_json TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS formulations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER NOT NULL,
-    version INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    source TEXT NOT NULL,
-    label TEXT,
-    created_at TEXT NOT NULL,
-    UNIQUE(product_id, version)
-);
-CREATE TABLE IF NOT EXISTS predictions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    formulation_id INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    objective REAL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS trials (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER NOT NULL,
-    formulation_version INTEGER NOT NULL,
-    label TEXT,
-    measurements_json TEXT NOT NULL,
-    sensory_json TEXT,
-    process_json TEXT,
-    batch_size_kg REAL,
-    operator TEXT,
-    trial_date TEXT,
-    notes TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS analyses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER NOT NULL,
-    trial_id INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS diagnoses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER NOT NULL,
-    trial_id INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS plans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER NOT NULL,
-    from_version INTEGER NOT NULL,
-    to_version INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    accepted INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS ledger (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    kind TEXT NOT NULL,
-    message TEXT NOT NULL,
-    payload_json TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS benchmarks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    payload_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-"""
+# The reference DDL is single-sourced from the SQLite migration file, so the
+# schema printed in the report and the schema created at runtime cannot drift.
+SQLITE_MIGRATIONS = Path(__file__).resolve().parent / "db" / "migrations" / "sqlite"
+
+
+def _load_schema() -> str:
+    try:
+        return (SQLITE_MIGRATIONS / "0001_init.sql").read_text(encoding="utf-8")
+    except OSError:  # pragma: no cover - only if data files were stripped
+        return ""
+
+
+SCHEMA = _load_schema()
 
 
 def _now() -> str:
@@ -116,18 +53,24 @@ def _now() -> str:
 class Store:
     """Thin, explicit data access layer."""
 
-    def __init__(self, path: Optional[Path] = None) -> None:
-        self.path = Path(path or DEFAULT_DB)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+    def __init__(self, path: Optional[Path] = None, url: Optional[str] = None) -> None:
+        # Precedence: an explicit url, then an explicit path (the test suite and
+        # the report writers both pass one), then the environment, then the
+        # bundled SQLite file. The default path needs nothing installed.
+        if url is None:
+            if path is not None:
+                url = f"sqlite:///{Path(path).as_posix()}"
+            else:
+                url = _settings().db_url
+        self.db_url = url
+        self.conn = connect(url)
+        self.dialect = getattr(self.conn, "dialect", "sqlite")
+        resolved = sqlite_path_from_url(url)
+        self.path = Path(resolved) if resolved is not None else Path(path or DEFAULT_DB)
         # The HTTP server is threaded and opens one store per request, so two
-        # requests can want the write lock at the same moment. Write-ahead
-        # logging plus a busy timeout turns that from an exception into a wait.
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA busy_timeout=5000")
-        self.conn.executescript(SCHEMA)
-        self.conn.commit()
+        # requests can want the write lock at the same moment. The SQLite backend
+        # sets write-ahead logging and a busy timeout for exactly that reason.
+        self.migrations = apply_migrations(self.conn, self.dialect)
 
     def close(self) -> None:
         self.conn.close()

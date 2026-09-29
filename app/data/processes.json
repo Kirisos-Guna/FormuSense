@@ -2,7 +2,7 @@
   "_meta": {
     "name": "FormuSense process & category library",
     "version": "1.0",
-    "note": "Each category declares formulation slots (what kind of ingredient goes where and roughly how much), a unit-operation sequence and the process parameters the physics engine consumes. Parameter ids used by the engine: bake_temp_c, bake_time_min, water_added_pct, sheet_thickness_mm, cook_temp_c, cook_time_min, hot_fill_temp_c, blend_time_min, roast_temp_c, barrel_temp_c, screw_speed_rpm, feed_moisture_pct, dryer_temp_c, dryer_time_min, syrup_temp_c, cooling_temp_c."
+    "note": "Each category declares formulation slots (what kind of ingredient goes where and roughly how much), a unit-operation sequence and the process parameters the physics engine consumes. Parameter ids used by the engine: bake_temp_c, bake_time_min, water_added_pct, sheet_thickness_mm, cook_temp_c, cook_time_min, hot_fill_temp_c, blend_time_min, roast_temp_c, barrel_temp_c, screw_speed_rpm, feed_moisture_pct, dryer_temp_c, dryer_time_min, syrup_temp_c, cooling_temp_c, hydration_temp_c, heat_treat_temp_c, hold_time_s, fill_temp_c."
   },
   "categories": {
     "cookie": {
@@ -191,6 +191,42 @@
         {"op": "Cooking & thickening", "duration_min": 18, "equipment": "Steam jacketed kettle", "control": "Add thickener slurry gradually; target viscosity"},
         {"op": "Homogenisation", "duration_min": 6, "equipment": "High pressure homogeniser", "control": "Two-stage; smooth mouthfeel"},
         {"op": "Hot filling & cooling", "duration_min": 20, "equipment": "Filler, cooling tunnel", "control": "Fill >= 88 degC; ensure seal sterility"}
+      ]
+    },
+    "beverage": {
+      "label": "Ready-to-drink beverage",
+      "typical_moisture_pct": [78, 92],
+      "typical_aw": [0.95, 0.995],
+      "typical_unit_weight_g": 200,
+      "slots": [
+        {"id": "water", "label": "Treated water", "groups": ["water"], "target": 78, "min": 55, "max": 92, "count": 1, "required": true},
+        {"id": "protein", "label": "Protein source", "groups": ["protein"], "target": 13, "min": 5, "max": 22, "count": 2, "required": true},
+        {"id": "dairy", "label": "Dairy / liquid base", "groups": ["dairy"], "target": 4, "min": 0, "max": 25, "count": 2, "required": false},
+        {"id": "sweetener", "label": "Sweetener", "groups": ["sweetener"], "target": 1.5, "min": 0, "max": 10, "count": 2, "required": false},
+        {"id": "fat", "label": "Fat / cream", "groups": ["fat"], "target": 0.8, "min": 0, "max": 6, "count": 1, "required": false},
+        {"id": "stabiliser", "label": "Stabiliser / hydrocolloid", "groups": ["hydrocolloid"], "target": 0.25, "min": 0.0, "max": 1.2, "count": 1, "required": false},
+        {"id": "acidulant", "label": "Acidulant", "groups": ["acidulant"], "target": 0.12, "min": 0.0, "max": 0.8, "count": 1, "required": false},
+        {"id": "flavour", "label": "Flavour & colour", "groups": ["colour_flavour"], "target": 0.8, "min": 0.2, "max": 3.5, "count": 2, "required": false},
+        {"id": "preservative", "label": "Preservative", "groups": ["preservative"], "target": 0.05, "min": 0.0, "max": 0.1, "count": 1, "required": false},
+        {"id": "fortificant", "label": "Vitamin / mineral premix", "groups": ["fortificant"], "target": 0.15, "min": 0.0, "max": 0.5, "count": 1, "required": false}
+      ],
+      "parameters": [
+        {"id": "hydration_temp_c", "label": "Protein hydration temperature", "unit": "degC", "min": 40, "max": 75, "default": 60},
+        {"id": "blend_time_min", "label": "Blending time", "unit": "min", "min": 5, "max": 30, "default": 15},
+        {"id": "homogenisation_bar", "label": "Homogenisation pressure", "unit": "bar", "min": 0, "max": 300, "default": 180},
+        {"id": "heat_treat_temp_c", "label": "Heat treatment temperature", "unit": "degC", "min": 63, "max": 140, "default": 121},
+        {"id": "hold_time_s", "label": "Heat treatment hold time", "unit": "s", "min": 2, "max": 30, "default": 4},
+        {"id": "fill_temp_c", "label": "Fill temperature", "unit": "degC", "min": 4, "max": 90, "default": 20},
+        {"id": "water_added_pct", "label": "Water added", "unit": "%", "min": 0, "max": 10, "default": 0}
+      ],
+      "unit_operations": [
+        {"op": "Water treatment (RO / demineralised)", "duration_min": 20, "equipment": "RO plant, UV, filters", "control": "Conductivity and microbial spec verified before use"},
+        {"op": "Protein hydration & dry blending", "duration_min": 15, "equipment": "High-shear mixer", "control": "Hydrate the protein fully at 55-65 degC; avoid lumps and foam"},
+        {"op": "Stabiliser, mineral & premix addition", "duration_min": 10, "equipment": "Dosing tank", "control": "Pre-disperse the hydrocolloid; add the vitamin premix last"},
+        {"op": "Homogenisation", "duration_min": 8, "equipment": "Two-stage homogeniser", "control": "Two-stage; target particle size for mouthfeel and physical stability"},
+        {"op": "Heat treatment", "duration_min": 10, "equipment": "UHT / plate pasteuriser", "control": "Meet the validated time-temperature; record every batch"},
+        {"op": "Cooling & aseptic / hot fill", "duration_min": 12, "equipment": "Aseptic filler or hot-fill line", "control": "Fill temperature per design; verify seal integrity"},
+        {"op": "Capping, labelling & pack", "duration_min": 10, "equipment": "Capper, labeller, shrink wrapper", "control": "Cap torque, lot code; ambient or chilled chain as designed"}
       ]
     }
   }

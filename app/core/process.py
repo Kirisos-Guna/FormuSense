@@ -35,6 +35,7 @@ PACK_FORMAT = {
     "extruded_snack": "VFFS pillow pack, metallised laminate, nitrogen flush",
     "bar": "Flow-wrap with cold-seal or heat-seal film, foil laminate",
     "sauce": "Hot-filled glass bottle with induction seal, then shrink sleeve",
+    "beverage": "Aseptic PET bottle with HDPE screw cap and induction seal; shrink-sleeve label",
 }
 
 

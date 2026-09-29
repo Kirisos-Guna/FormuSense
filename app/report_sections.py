@@ -42,6 +42,15 @@ STUDENT: Dict[str, str] = {
     "duration": "[Internship start date] to [Internship end date]",
 }
 
+#: The presenting group. :data:`STUDENT` above is the individual the college
+#: template certifies - one name, one register number - so the group is kept
+#: separate rather than folded into it. The slide deck reads this, which keeps
+#: the names written in exactly one place.
+TEAM: Dict[str, Any] = {
+    "name": "Technostatic Wings",
+    "members": ["Raja Sethupathy", "Guna M", "Angel Brightlin A."],
+}
+
 CHAPTERS: List[tuple] = [
     (1, "Abstract"),
     (2, "Details about the Training"),

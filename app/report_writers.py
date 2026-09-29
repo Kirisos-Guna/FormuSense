@@ -417,8 +417,25 @@ def _pick_case_arm(benchmark: Dict[str, Any], needle: str = "namkeen") -> Dict[s
     return arms[0] if arms else {}
 
 
+def _figure_module() -> Optional[Any]:
+    """The figure module, or ``None`` when the optional drawing stack is absent.
+
+    Pillow and Pygments are extras (``requirements-optional.txt``): a report run
+    without them still produces every chapter, it simply ships without figures
+    rather than failing at import time.
+    """
+    try:
+        from . import figures as figure_module
+    except ImportError as exc:  # pragma: no cover - depends on the environment
+        print(f"  note: figures disabled, drawing extras not installed ({exc})")
+        return None
+    return figure_module
+
+
 def _draw_figures(store: Any, benchmark: Dict[str, Any], directory: Path) -> Dict[str, Path]:
-    from . import figures as figure_module
+    figure_module = _figure_module()
+    if figure_module is None:
+        return {}
     from .service import AgentService
 
     directory.mkdir(parents=True, exist_ok=True)
@@ -493,7 +510,9 @@ def _draw_figures(store: Any, benchmark: Dict[str, Any], directory: Path) -> Dic
 
 
 def _draw_listings(directory: Path) -> List[Dict[str, Any]]:
-    from . import figures as figure_module
+    figure_module = _figure_module()
+    if figure_module is None:
+        return []
 
     directory.mkdir(parents=True, exist_ok=True)
     listings: List[Dict[str, Any]] = []
