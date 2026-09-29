@@ -17,6 +17,7 @@ from pathlib import Path
 from app import config
 from app.db import backend, migrate
 from app.db.backend import PostgresConnection, SqliteConnection
+from app.db.check import check as run_check
 from app.store import Store
 
 
@@ -289,6 +290,65 @@ class StoreBackendTests(unittest.TestCase):
             store.clear(product_id)
         finally:
             store.close()
+
+
+class RecordCheckTests(unittest.TestCase):
+    """The deployment check: does the record layer work on this database at all?"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="formusense-check-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_the_check_walks_every_operation_the_record_layer_has(self) -> None:
+        result = run_check(f"sqlite:///{(self.tmp / 'check.db').as_posix()}")
+        self.assertTrue(result["ok"], result["failure"])
+        steps = [step["step"] for step in result["steps"]]
+        for expected in (
+            "migrations",
+            "product",
+            "upsert",
+            "prediction",
+            "trial",
+            "diagnosis",
+            "plan",
+            "ledger",
+            "benchmark",
+            "delete",
+        ):
+            self.assertTrue(any(expected in name for name in steps), f"no step mentions {expected}: {steps}")
+        self.assertTrue(all(step["ok"] for step in result["steps"]))
+
+    def test_the_check_leaves_the_record_the_way_it_found_it(self) -> None:
+        # It is pointed at a deployment's database, so it has to be a read: leaving a
+        # made-up benchmark behind would make the interface report a comparison that
+        # nobody ran, as the latest one on record.
+        url = f"sqlite:///{(self.tmp / 'clean.db').as_posix()}"
+        store = Store(url=url)
+        try:
+            store.save_benchmark({"summary": {"agent_successes": 9}})
+        finally:
+            store.close()
+
+        self.assertTrue(run_check(url)["ok"])
+
+        store = Store(url=url)
+        try:
+            self.assertEqual(len(store.products()), 0, "the check left a product behind")
+            latest = store.latest_benchmark()
+            self.assertEqual(latest["summary"]["agent_successes"], 9, "the check replaced the stored benchmark")
+        finally:
+            store.close()
+
+    def test_a_failure_names_the_step_and_carries_the_traceback(self) -> None:
+        # The reason the command exists: on a hosted job the traceback sits in a log
+        # that needs authentication to open, so the failure has to be quotable.
+        result = run_check(f"sqlite:///{self.tmp.as_posix()}")  # a directory, not a file
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failure"]["step"], "open the store and apply the migrations")
+        self.assertIn("Error", result["failure"]["type"])
+        self.assertIn("Traceback", result["failure"]["traceback"])
+        self.assertTrue(result["steps"])
+        self.assertFalse(result["steps"][-1]["ok"])
 
 
 if __name__ == "__main__":

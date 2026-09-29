@@ -86,28 +86,34 @@ jobs:
       - name: Install the PostgreSQL driver
         run: pip install "psycopg[binary]"
 
-      - name: Migrate, write and read back the record on PostgreSQL
+      - name: Write and read back every kind of record on PostgreSQL
+        # --db-check names the operation that failed and prints its traceback last.
+        # The wrapper quotes that tail into a check annotation, because a job log needs
+        # authentication to open and an annotation does not - and a failure nobody can
+        # read is a failure nobody can fix.
         env:
           FORMUSENSE_DB_URL: postgresql://formu:formu@localhost:5432/formusense
-          FORMUSENSE_TEST_POSTGRES: postgresql://formu:formu@localhost:5432/formusense
         run: |
-          python - <<'PY'
-          from app.store import Store
-          from app.core.brief import build_brief
-          store = Store()
-          print("dialect:", store.dialect, "migrations:", store.migrations["applied"])
-          pid = store.create_product(build_brief({"product_name": "ci pg", "category": "cookie", "spec_text": ""}))
-          assert store.product(pid), "write/read failed"
-          store.clear(pid)
-          store.close()
-          PY
-          python -m unittest tests.test_db -v
+          set +e
+          python run.py --db-check > dbcheck.log 2>&1
+          status=$?
+          cat dbcheck.log
+          if [ "$status" -ne 0 ]; then
+            detail=$(tail -c 3500 dbcheck.log | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g')
+            echo "::error title=The record layer failed on PostgreSQL::$detail"
+          fi
+          exit "$status"
+
+      - name: Run the database layer tests
+        env:
+          FORMUSENSE_TEST_POSTGRES: postgresql://formu:formu@localhost:5432/formusense
+        run: python -m unittest tests.test_db -v
 
       - name: Run the seeded loop on PostgreSQL
-        # The round trip above touches three tables. The seed drives every insert the
-        # record layer has - the formulation upsert, predictions, trials, analyses,
-        # diagnoses, plans, the ledger and benchmarks - against the real server, so a
-        # dialect difference in any of them fails here instead of in a deployment.
+        # The check above walks the record layer's operations one at a time; this
+        # drives the application itself - the agent, the plant and the benchmark's
+        # inserts - so a dialect difference that only shows up in the whole loop
+        # fails here instead of in a deployment.
         env:
           FORMUSENSE_DB_URL: postgresql://formu:formu@localhost:5432/formusense
         run: python run.py --seed

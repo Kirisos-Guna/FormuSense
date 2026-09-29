@@ -20,8 +20,8 @@ python run.py --report        # write the internship report (DOCX, HTML, Markdow
 python run.py --slides        # write the presentation (PPTX) from the record
 python run.py --build-dataset # build the acceptance-model dataset (offline, no API key)
 python run.py --train         # train and evaluate the acceptance model, then report it
-python run.py --train-report  # print the metrics of the latest trained model
-python run.py --db-migrate    # apply pending database migrations (both dialects)
+python run.py --train-report  # print the metrics of the latest trained modelpython run.py --db-migrate     # apply pending database migrations (both dialects)
+python run.py --db-check       # write and read back every kind of record the app keeps
 python -m unittest discover -s tests -t .   # the test suite
 ```
 
@@ -107,6 +107,15 @@ docker compose up --build     # app + PostgreSQL, schema migrated on startup
 Schema changes are forward-only, numbered SQL files per dialect under
 `app/db/migrations/`, tracked in a `schema_migrations` table. `GET /api/db/status`
 reports the dialect, whether its driver is present and which migrations have run.
+
+`python run.py --db-check` writes and reads back every kind of record the record
+layer keeps - the product, the formulation upsert, the prediction, the trial, the
+analysis and diagnosis, the plan, the ledger, the benchmark - against whatever
+`FORMUSENSE_DB_URL` points at, and `--db-migrate` reports the schema on its own.
+Both are worth running once against a new server: SQLite and PostgreSQL are close
+enough to pass a casual look and different enough to fail on a fresh one. The check
+reports the operation that broke and its traceback, which is what the CI job needs
+to say anything useful about a failure.
 
 ## The learning pipeline
 

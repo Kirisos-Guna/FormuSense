@@ -15,6 +15,7 @@ Runs on the Python standard library only::
     python run.py --train          # train and evaluate the acceptance model
     python run.py --train-report   # print the metrics of the latest trained model
     python run.py --db-migrate     # apply pending database migrations
+    python run.py --db-check       # write and read back every kind of record the app keeps
 """
 from __future__ import annotations
 
@@ -137,11 +138,32 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="apply pending database migrations and report the schema status, then exit",
     )
+    parser.add_argument(
+        "--db-check",
+        action="store_true",
+        help="write and read back every kind of record the application keeps, then exit",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+
+    if args.db_check:
+        from app.db.check import check
+
+        print("Checking the record layer against the configured database...")
+        result = check()
+        for step in result["steps"]:
+            print(f"  {'ok  ' if step['ok'] else 'FAIL'}  {step['step']}: {step['detail']}")
+        if result["failure"]:
+            # The traceback is printed last so that a job which can only quote the
+            # tail of this output still quotes the part that explains the failure.
+            print(f"  dialect: {result['dialect']}")
+            print(result["failure"]["traceback"].rstrip())
+            return 1
+        print(f"  {len(result['steps'])} operations on {result['dialect']}; the record layer works here.")
+        return 0
 
     if args.db_migrate:
         from app.db.migrate import migration_status
