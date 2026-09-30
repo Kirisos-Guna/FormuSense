@@ -255,6 +255,26 @@ class BehaviourTests(unittest.TestCase):
         self.assertIn("CLAIM IDS AVAILABLE", prompt)
         self.assertIn("ALLERGEN IDS AVAILABLE", prompt)
 
+    def test_the_review_is_told_what_to_return(self) -> None:
+        # The data message names the sections; only the instruction says which keys to
+        # answer with and that a value is not among them. It travels as a system message,
+        # and without it the model is left to invent a shape and the parser finds nothing.
+        seen = {}
+
+        def transport(url, headers, body, timeout):
+            seen["body"] = json.loads(body.decode("utf-8"))
+            return json.dumps({"choices": [{"message": {"content": "{}"}}]}).encode("utf-8")
+
+        brief = brief_module.build_brief(payload())
+        spec_review.review(brief, settings=configured(), cache=self.store, transport=transport)
+        messages = seen["body"]["messages"]
+        self.assertEqual(messages[0]["role"], "system")
+        instructions = messages[0]["content"]
+        self.assertIn("claims_missed", instructions)
+        self.assertIn("open_questions", instructions)
+        self.assertIn("Do not restate what the parser already found", instructions)
+        self.assertIn("single JSON object", instructions)
+
     def test_the_question_limit_is_enforced_however_many_arrive(self) -> None:
         reply = {"open_questions": ["Question %d?" % index for index in range(40)]}
         brief = brief_module.build_brief(payload())

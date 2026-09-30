@@ -243,6 +243,17 @@ def _declared_pack_size(text: str) -> Optional[Tuple[float, str]]:
     return None
 
 
+def declared_pack_size(text: str) -> Optional[Tuple[float, str]]:
+    """The pack size a text declares, as ``(value, unit)``, or ``None``.
+
+    The public name for the same reading :func:`parse_spec_numbers` makes, so a caller
+    that only wants the pack size - the document readers in :mod:`app.core.document_brief`
+    and :mod:`app.core.icmr_export`'s neighbours - does not have to reach for a private
+    function or parse the whole specification to get one number.
+    """
+    return _declared_pack_size(text)
+
+
 def _comparator_in(window: str) -> str:
     found = _COMPARATOR.search(window)
     if not found:

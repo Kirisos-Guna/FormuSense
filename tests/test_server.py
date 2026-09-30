@@ -7,18 +7,35 @@ product, 400 for a missing specification) instead of a stack trace.
 """
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
 from app import server
 from app.bootstrap import CASES
+from app.core import documents
 from app.service import AgentService
 from app.store import Store
+
+
+def word_document(*lines: str) -> bytes:
+    """A minimal .docx: one paragraph per line, which is all the reader needs."""
+    body = "".join(f"<w:p><w:r><w:t>{line}</w:t></w:r></w:p>" for line in lines)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as package:
+        package.writestr("word/document.xml", f'<?xml version="1.0"?><w:document>{body}</w:document>')
+    return buffer.getvalue()
+
+
+def as_data_url(name: str, payload: bytes) -> str:
+    return f"data:application/octet-stream;base64," + base64.b64encode(payload).decode()
 
 
 class RouterTests(unittest.TestCase):
@@ -265,6 +282,130 @@ class AiSurfaceTests(unittest.TestCase):
         handler, params = server.ROUTER.match("POST", "/api/products/424242/ask")
         with self.assertRaises(KeyError):
             handler(self.service, {"question": "Anything?"}, params)
+
+
+class DocumentUploadTests(unittest.TestCase):
+    """The upload route: it reads a document, and it writes nothing at all."""
+
+    REPORT = (
+        "High protein ragi cookie",
+        "Specification: protein 15 g per 100 g, moisture 3.5 %, shelf life 180 days, "
+        "cost not more than INR 240 per kg. 40 g pack.",
+        "Gluten free and no soy. Vegetarian. High protein claim.",
+    )
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="formusense-doc-"))
+        self.service = AgentService(Store(self.tmp / "test.db"))
+        self.uploads = self.tmp / "uploads"
+        self.patch = mock.patch.object(documents, "UPLOAD_DIR", self.uploads)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+
+    def tearDown(self) -> None:
+        self.service.store.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def call(self, method: str, path: str, body=None):
+        matched = server.ROUTER.match(method, path)
+        self.assertIsNotNone(matched, f"no route for {method} {path}")
+        handler, params = matched
+        return handler(self.service, body or {}, params)
+
+    def upload(self, name: str = "ragi-report.docx", **extra):
+        return self.call(
+            "POST",
+            "/api/brief/from-document",
+            {"filename": name, "data_url": as_data_url(name, word_document(*self.REPORT)), **extra},
+        )
+
+    def test_the_route_reads_a_document_into_form_fields(self) -> None:
+        proposal = self.upload()
+        fields = proposal["fields"]
+        self.assertEqual(proposal["document"]["name"], "ragi-report.docx")
+        self.assertEqual(proposal["document"]["format"], "docx")
+        self.assertEqual(fields["product_name"], "High protein ragi cookie")
+        self.assertEqual(fields["category"], "cookie")
+        self.assertEqual(fields["diet"], "vegetarian")
+        self.assertAlmostEqual(fields["unit_weight_g"], 40.0)
+        self.assertIn("high_protein", fields["claims"])
+        self.assertIn("gluten", fields["allergens_to_avoid"])
+        self.assertTrue(proposal["found"])
+        self.assertTrue(proposal["missing"])
+
+    def test_reading_a_document_leaves_no_trace_on_the_record(self) -> None:
+        self.upload()
+        self.assertEqual(self.service.store.products(), [])
+        self.assertEqual(self.service.store.entries(), [])
+        self.assertFalse(self.uploads.exists())
+
+    def test_the_upload_can_be_read_with_the_model_off(self) -> None:
+        proposal = self.upload(use_ai=False)
+        self.assertFalse(proposal["model"]["reviewed"])
+        self.assertIn("not asked", proposal["model"]["note"])
+
+    def test_a_body_without_a_file_is_a_bad_request(self) -> None:
+        with self.assertRaises(ValueError):
+            self.call("POST", "/api/brief/from-document", {"filename": "x.docx"})
+
+    def test_a_url_that_is_not_a_data_url_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            self.call(
+                "POST",
+                "/api/brief/from-document",
+                {"filename": "x.docx", "data_url": "https://example.com/x.docx"},
+            )
+
+    def test_a_format_nothing_can_read_is_refused_with_the_list(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            self.call(
+                "POST",
+                "/api/brief/from-document",
+                {"filename": "report.pages", "data_url": as_data_url("report.pages", b"whatever")},
+            )
+        self.assertIn(".docx", str(caught.exception))
+
+    def test_a_product_created_from_a_document_names_the_document(self) -> None:
+        proposal = self.upload()
+        created = self.call(
+            "POST",
+            "/api/products",
+            {
+                **proposal["fields"],
+                "source_document": {
+                    "name": "ragi-report.docx",
+                    "format": "docx",
+                    "characters": proposal["document"]["characters"],
+                    "data_url": as_data_url("ragi-report.docx", word_document(*self.REPORT)),
+                    "use_ai": False,
+                },
+            },
+        )
+        entries = [
+            entry
+            for entry in self.service.store.entries(created["product_id"])
+            if entry["kind"] == "document"
+        ]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("ragi-report.docx", entries[0]["message"])
+        # The file is kept, and only now - this is the moment it became evidence.
+        self.assertEqual(len(list(self.uploads.glob("*.docx"))), 1)
+
+    def test_a_product_designed_without_a_document_has_no_such_entry(self) -> None:
+        created = self.call(
+            "POST",
+            "/api/products",
+            {"product_name": "Typed brief", "category": "cookie", "spec_text": "Protein 15 g per 100 g. 40 g pack."},
+        )
+        kinds = {entry["kind"] for entry in self.service.store.entries(created["product_id"])}
+        self.assertNotIn("document", kinds)
+        self.assertFalse(self.uploads.exists())
+
+    def test_the_catalogue_offers_the_formats_the_reader_implements(self) -> None:
+        offered = server.catalog()["documents"]
+        self.assertIn(".docx", offered["accept"])
+        self.assertIn(".pdf", offered["accept"])
+        self.assertGreaterEqual(offered["limit_mb"], 1)
 
 
 if __name__ == "__main__":

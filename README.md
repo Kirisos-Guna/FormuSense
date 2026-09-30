@@ -18,6 +18,7 @@ python run.py --seed          # (re)create the demonstration cases
 python run.py --benchmark     # trial-efficiency benchmark: agent vs one-factor-at-a-time
 python run.py --report        # write the internship report (DOCX, HTML, Markdown)
 python run.py --slides        # write the presentation (PPTX) from the record
+python run.py --icmr-export   # write the ICMR-NIN 2020 reference set (XLSX and CSV)
 python run.py --build-dataset # build the acceptance-model dataset (offline, no API key)
 python run.py --train         # train and evaluate the acceptance model, then report it
 python run.py --train-report  # print the metrics of the latest trained modelpython run.py --db-migrate     # apply pending database migrations (both dialects)
@@ -33,8 +34,10 @@ build step. Open `http://127.0.0.1:8770` after `python run.py`, or press
 
 1. **Case studies** creates a complete product from a fixed brief in about a
    second - the fastest way to see the whole loop. **New product** takes your
-   own specification text instead, and the example-brief chips fill the form
-   from a seeded case if you would rather not write one.
+   own specification text - or the R&D team's own document, which the agent
+   reads and turns into that form (see **The R&D document** below). The
+   example-brief chips fill the form from a seeded case if you would rather not
+   write one.
 2. The product opens on **Overview**: the targets the agent parsed, the
    formulation, and anything the text could not answer as an open question.
 3. **Run physical trial** makes a batch on the simulated plant and lands you on
@@ -65,6 +68,40 @@ their own card instead of widening the page, the product actions stack full
 width, and form controls are 16 px so mobile browsers do not zoom on focus.
 The rules that fixed each measured overflow are locked in by `tests/test_ui.py`,
 which runs without a browser.
+
+## The R&D document
+
+An R&D team already has the product written down, and asking them to retype it is
+asking them to introduce a transcription error. So the **New product** form takes
+their document: drop a `.docx`, `.xlsx`, `.pptx`, `.pdf`, `.txt`, `.csv` or `.md`
+on the upload at the top of the form and press **Choose the document**.
+
+What comes back fills the form and nothing else. The panel under the upload says
+what was read, whether each value came from a rule or from the model, what the
+document does not state (every target the category cares about that nobody wrote
+down), and shows the text that was read. You check it and press **Design product** -
+reading a document never creates anything on its own.
+
+Three things about it are worth knowing:
+
+- **The reading is standard library only.** A `.docx`, `.xlsx` or `.pptx` is a ZIP of
+  XML, so paragraphs, table cells, shared strings and slide text are read exactly. A
+  text file is decoded by sniffing the encoding. A `.pdf` is best effort - its own
+  text operators, decompressed with `zlib` - so a scanned page has no text to read and
+  says so, rather than filling the form with noise. The old binary formats (`.doc`,
+  `.xls`, `.ppt`) are refused by name, because reading them needs a parser library
+  this project does not have.
+- **The specification text is the document's own words.** That is what keeps the
+  promise the rest of the system makes: the numbers the brief ends up holding are the
+  ones the rule-based parser read off the screen, not ones a model wrote down.
+- **What the document is kept for.** Nothing is stored while you are looking at a
+  draft. When the product is created, the file is written to the git-ignored
+  `app/data/uploads/` and the product's ledger records which document the brief came
+  from, so a reader can trace the specification back to the sheet it arrived on.
+
+```
+POST /api/brief/from-document   {filename, data_url, use_ai}   -> fields + found + missing
+```
 
 ## The optional model layer (OpenRouter)
 
@@ -230,10 +267,20 @@ that group. The reference set is editable data (`app/data/dri_profiles.json`) an
 every row carries the standard it was compared against. This is
 development guidance, not medical advice, and the payload says so.
 
+`python run.py --icmr-export` writes that reference set out for a reader who is
+not running the program: `report/FormuSense_ICMR_NIN_2020_protein_reference.xlsx`
+(the 15 groups, one column per recorded field, on one sheet; the citation, units,
+disclaimer and caveats on a second) and the same table as `.csv`. The workbook is
+built from `app/core/population.py` rather than from a second copy of the numbers,
+so it cannot drift from what the interface computes with, and `--out` chooses
+where it lands. It is packaged by `app/xlsx_writer.py`, which builds the OOXML
+parts from the standard library - no `openpyxl`, no install.
+
 ## What it does
 
 | Stage | Module | What happens |
 | --- | --- | --- |
+| Read the R&D document | `app/core/documents.py`, `app/core/document_brief.py` | An uploaded `.docx`, `.xlsx`, `.pptx`, `.pdf`, `.txt` or `.csv` is read into text with the standard library alone, and the same parser that reads a typed specification reads it: category, diet, claims, allergens and pack size are proposed as form fields, with a list of what the document does not state. With a model key, a model may transcribe what the document says that the rules missed - never a target. |
 | Understand the brief | `app/core/brief.py`, `app/core/vision.py` | Spec numbers, comparators and units are parsed into targets with tolerances; category, diet, allergens and claims are inferred; photographs are measured offline with Pillow, and a vision model is used only if a key is configured. Anything the text cannot answer becomes an open question. |
 | Design | `app/core/formulate.py` | Slots per category, filled by intent measured against a neutral reference formulation, reconciled to 100 % by iterative proportional fitting, with acidulants dosed by bisection against the pH target. |
 | Predict | `app/core/{nutrition,physical,cost,engine,uncertainty}.py` | Mass balance, Atwater energy, water activity, pH by titration, texture, stability, cost and processability — each with a sigma and a published interval. |
@@ -330,6 +377,10 @@ app/report_writers.py   DOCX / HTML / Markdown writers
 app/docx_writer.py      a .docx writer built on the standard library
 app/slides.py           the presentation's content, built from the record
 app/pptx_writer.py      a .pptx writer built on the standard library
+app/xlsx_writer.py      an .xlsx writer built on the standard library
+app/icmr_export.py      the ICMR-NIN 2020 reference set as a workbook and a CSV
+app/core/documents.py   reads an uploaded R&D document into text, standard library only
+app/core/document_brief.py  turns that text into the fields the New product form asks for
 tests/                  the test suite
-report/                 generated report and presentation output
+report/                 generated report, presentation and reference-set output
 ```

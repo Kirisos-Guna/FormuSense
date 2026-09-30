@@ -67,7 +67,17 @@ against one-factor-at-a-time.
 
 Prefer your own product? **New product** takes your specification text. If you
 would rather not write one, press an example brief chip to fill the form from a
-seeded case and then edit it.
+seeded case and then edit it - or upload the document the R&D team already has.
+
+**Step 0 - or upload the report.** At the top of the **New product** form there
+is an upload: drop a `.docx`, `.xlsx`, `.pptx`, `.pdf`, `.txt`, `.csv` or `.md` on
+it, or press **Choose the document**. The agent reads the specification out of it
+and fills the form - product name, category, diet, pack size, claims, allergens -
+then lists what the document does *not* state. Every value is shown with whether it
+came from a rule or from the model, and the text that was read is there to check
+against. Nothing is designed until you press **Design product**, and reading the
+document stores nothing: the file is kept only when the product it described is
+created, where the ledger records which document the brief came from.
 
 The pack-size field is labelled in the unit the product is sold in: **Unit
 volume (ml)** for a beverage, **Unit weight (g)** for everything else. It
@@ -186,6 +196,7 @@ python run.py --train          # train and evaluate the acceptance model
 python run.py --train-report   # print the metrics of the latest trained model
 python run.py --report         # write the internship report (DOCX, HTML, Markdown)
 python run.py --slides         # write the presentation (PPTX)
+python run.py --icmr-export    # write the ICMR-NIN 2020 reference set (XLSX and CSV)
 python run.py --db-migrate     # apply pending database migrations
 ```
 
@@ -198,8 +209,8 @@ model layer described in section 8 is never used by these commands.
 ## 8. The optional model layer
 
 Everything in this guide works with no API key, no network call and no third-party
-service, and that is the default. With a key configured, a model is added to three
-places - and only three - and in each of them it is an enrichment:
+service, and that is the default. With a key configured, a model is added to four
+places - and only four - and in each of them it is an enrichment:
 
 * **Reference photographs.** The offline measurement of colour, lightness and
   texture always runs. A model adds the semantic description on top: piece shape,
@@ -212,6 +223,14 @@ places - and only three - and in each of them it is an enrichment:
   the category does not use, and further questions. Those land in the brief's open
   questions, and the claims are shown as suggestions for **you** to tick. No target,
   pack size, cost ceiling or already-parsed claim is ever changed by it.
+* **An uploaded R&D document.** The document is read into text by the standard
+  library first, and the same rule-based parser reads it, so the upload works with no
+  key at all. A model adds only what the parser missed: a product name, a category, a
+  diet, claim and allergen ids that already exist in the registries, and a declared
+  pack size the rules did not recognise. There is no field for a target or a property,
+  the one number it may transcribe is labelled in the form as read by a model and not
+  parsed by a rule, and the specification text that reaches the parser is always the
+  document's own words.
 * **The product record.** The **Ask** tab answers a question from a bounded extract
   of the product's stored brief, formulation, prediction, trials and plan, naming
   the parts of the record it used. It is read-only.

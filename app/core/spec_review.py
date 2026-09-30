@@ -212,7 +212,14 @@ def review(
     )
     try:
         result = ai_client.chat(
-            [{"role": "user", "content": prompt}],
+            [
+                # The instructions travel as a system message, and the specification as
+                # the user message. Without this the model was shown a specification and
+                # a list of ids with nothing saying what to do with either, so its reply
+                # was whatever it felt like and the parser kept silently finding nothing.
+                {"role": "system", "content": ai_prompts.SPEC_REVIEW_PROMPT_TEMPLATE},
+                {"role": "user", "content": prompt},
+            ],
             settings=config,
             cache=cache,
             product_id=product_id,

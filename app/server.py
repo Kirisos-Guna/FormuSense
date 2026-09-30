@@ -36,7 +36,7 @@ from urllib.parse import unquote, urlparse
 from . import benchmark as benchmark_module
 from .bootstrap import CASES, INFEASIBLE_CASE, seed_all
 from .config import ai_settings, settings
-from .core import kb, kpi as kpi_registry, population as population_module, vision
+from .core import documents, kb, kpi as kpi_registry, population as population_module, vision
 from .logging_setup import configure_logging, logger, new_request_id, summarise_path
 from .db import driver_available, migration_status
 from .service import AgentService
@@ -55,7 +55,7 @@ _HEAVY = threading.Lock()
 # Catalogue: what the UI is allowed to offer the user
 # --------------------------------------------------------------------------- #
 def catalog() -> Dict[str, Any]:
-    """Categories, slots, ingredients, claims, allergens and KPIs for the UI."""
+    """Categories, slots, ingredients, claims, allergens, KPIs and uploads for the UI."""
     categories = []
     for category_id, category in kb.categories().items():
         categories.append(
@@ -137,6 +137,10 @@ def catalog() -> Dict[str, Any]:
         # budget belongs to a request (see /api/health), not to a static description.
         "vision": vision.vision_available(),
         "ai": ai_settings().as_dict(),
+        # Which documents the upload accepts, and how large one may be: the list comes
+        # from the reader that implements it rather than from the interface, so the
+        # form cannot offer a format nothing can open.
+        "documents": documents.catalog_entry(),
         "summary": kb.summarise_kb(),
     }
 
@@ -396,6 +400,17 @@ def r_benchmark_latest(service: AgentService, body: Dict[str, Any], params: Dict
 
 
 # --------------------------------------------------------------- write routes #
+@_POST("/api/brief/from-document")
+def r_brief_from_document(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
+    """Read an uploaded R&D document into a proposal for the New product form.
+
+    A POST because the file travels in the body as a data URL, and a separate route
+    from /api/products because reading a document is not creating a product: this one
+    stores nothing, so an upload can be tried, read back and abandoned.
+    """
+    return service.read_document(body)
+
+
 @_POST("/api/products")
 def r_create_product(service: AgentService, body: Dict[str, Any], params: Dict[str, str]) -> Any:
     if not str(body.get("spec_text") or body.get("description") or "").strip():

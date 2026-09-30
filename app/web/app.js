@@ -17,6 +17,9 @@
     health: null,
     welcome: false,
     images: [],
+    // The uploaded R&D document, if one was read: kept only so the product that comes
+    // out of it can record which file the brief was read from.
+    document: null,
     busy: 0
   };
 
@@ -288,6 +291,18 @@
     html.push("<div class='card'>");
     html.push("<h2>Describe the target product</h2>");
     html.push("<p class='card-sub'>Write the specification the way a brand team would send it: targets, claims, pack size, cost, shelf life. The agent parses the numbers out of the text and shows you what it understood before anything is formulated.</p>");
+    // The R&D team usually has this written down already, so the form offers the
+    // document before it offers the textarea. What comes back fills the form below and
+    // nothing else: the reading is a draft until the person presses the button.
+    var docInfo = catalog.documents || {};
+    var docAccept = docInfo.accept || ".docx,.xlsx,.pdf,.txt,.csv";
+    html.push("<div class='file-drop' id='doc-drop'><strong>Does the R&amp;D team already have this written down?</strong>" +
+      "<p class='small muted'>Upload their product report or specification sheet (" + esc(docAccept) +
+      ", up to " + num(docInfo.limit_mb || 10, 0) + " MB). The agent reads the specification out of it and fills this form for you to check.</p>" +
+      "<div class='row'><button class='ghost' type='button' id='doc-pick'>Choose the document</button>" +
+      "<span class='small muted' id='doc-state'>Or just type the specification below.</span></div>" +
+      "<input type='file' id='doc-file' accept='" + esc(docAccept) + "' hidden></div>" +
+      "<div id='doc-review'></div>");
     html.push("<label class='field'><span>Product name</span><input type='text' id='f-name' value='" + esc(prefill && prefill.product_name || "") + "' placeholder='e.g. High-protein ragi cookie'></label>");
     html.push("<label class='field'><span>Specification text</span><textarea id='f-spec' placeholder='High protein masala extruded namkeen. 30 g pack. Protein 15 g per 100 g. Moisture 3%. Sodium 480 mg per 100 g. Shelf life 6 months. Ingredient cost not more than INR 185 per kg.'>" + esc(spec) + "</textarea></label>");
     html.push(exampleBriefs());
@@ -386,6 +401,28 @@
     files.addEventListener("change", function () { addFiles(files.files); });
     drawThumbs();
 
+    var docFile = document.getElementById("doc-file");
+    var docDrop = document.getElementById("doc-drop");
+    if (docDrop && docFile) {
+      // The button and the zone are the same affordance; the guard stops the input's
+      // own click from bubbling back into the zone and opening the picker twice.
+      docDrop.addEventListener("click", function (event) {
+        if (event.target === docFile) return;
+        docFile.click();
+      });
+      docDrop.addEventListener("dragover", function (event) { event.preventDefault(); docDrop.classList.add("hot"); });
+      docDrop.addEventListener("dragleave", function () { docDrop.classList.remove("hot"); });
+      docDrop.addEventListener("drop", function (event) {
+        event.preventDefault();
+        docDrop.classList.remove("hot");
+        var dropped = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        if (dropped) readDocument(dropped);
+      });
+      docFile.addEventListener("change", function () {
+        if (docFile.files && docFile.files[0]) readDocument(docFile.files[0]);
+      });
+    }
+
     var preset = document.getElementById("p-preset");
     preset.addEventListener("change", function () {
       var values = [null, { drying_efficiency: 1.0, temp_offset_c: 0, acid_retention: 1.0, sodium_carry: 1.0, sugar_inversion: 1.0 },
@@ -435,6 +472,11 @@
         Array.prototype.forEach.call(document.querySelectorAll("#f-claims input"), function (input) {
           input.checked = (payload.claims || []).indexOf(input.value) >= 0;
         });
+        // The example replaces whatever a document proposed, so the record must stop
+        // claiming the brief was read from an upload.
+        state.document = null;
+        var review = document.getElementById("doc-review");
+        if (review) review.innerHTML = "";
         refreshDesignState();
         toast("Example brief loaded - edit it, or press Design product");
       });
@@ -442,6 +484,7 @@
 
     document.getElementById("btn-clear").addEventListener("click", function () {
       state.images = [];
+      state.document = null;
       location.hash = "#/new";
     });
     design.addEventListener("click", function () {
@@ -465,6 +508,97 @@
     });
   }
 
+  /* An uploaded R&D document, read into the form.
+     The upload stores nothing: the server parses the document and hands back what it
+     found, and the file itself is kept only when the product it described is created. */
+  function readDocument(file) {
+    var info = (state.catalog || {}).documents || {};
+    var line = document.getElementById("doc-state");
+    function say(text) { if (line) line.textContent = text; }
+    var limit = (info.limit_mb || 10) * 1024 * 1024;
+    if (file.size > limit) {
+      say(file.name + " is " + num(file.size / 1048576, 1) + " MB; the limit is " + num(info.limit_mb || 10, 0) + " MB.");
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      say("Reading " + file.name + "...");
+      var useAi = !!((document.getElementById("f-use-ai") || {}).checked);
+      api("POST", "/api/brief/from-document", {
+        filename: file.name, data_url: reader.result, use_ai: useAi
+      }).then(function (proposal) {
+        var info2 = proposal.document || {};
+        state.document = {
+          name: file.name,
+          format: info2.format,
+          characters: info2.characters,
+          data_url: reader.result,
+          use_ai: useAi
+        };
+        applyProposal(proposal);
+        say("Read " + num(info2.characters, 0) + " characters from " + file.name + ".");
+        toast("Specification read from " + file.name + " - check the form, then press Design product");
+      }).catch(function (error) {
+        say("Could not read " + file.name + ".");
+        fail(error);
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function applyProposal(proposal) {
+    var fields = proposal.fields || {};
+    if (fields.product_name) document.getElementById("f-name").value = fields.product_name;
+    var spec = document.getElementById("f-spec");
+    if (fields.spec_text) spec.value = fields.spec_text;
+    if (fields.category) document.getElementById("f-category").value = fields.category;
+    if (fields.diet) document.getElementById("f-diet").value = fields.diet;
+    if (fields.unit_weight_g !== null && fields.unit_weight_g !== undefined) {
+      document.getElementById("f-unit").value = fields.unit_weight_g;
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("#f-claims input"), function (input) {
+      input.checked = (fields.claims || []).indexOf(input.value) >= 0;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#f-allergens input"), function (input) {
+      input.checked = (fields.allergens_to_avoid || []).indexOf(input.value) >= 0;
+    });
+    // The pack field relabels itself for a drink and the button follows the
+    // specification field. Both are the form's own listeners, so both are told.
+    document.getElementById("f-category").dispatchEvent(new Event("change", { bubbles: true }));
+    spec.dispatchEvent(new Event("input", { bubbles: true }));
+    renderDocumentReview(proposal);
+  }
+
+  function renderDocumentReview(proposal) {
+    var holder = document.getElementById("doc-review");
+    if (!holder) return;
+    var info = proposal.document || {};
+    var html = ["<div class='callout'><strong>Read from " + esc(info.name || "your document") + "</strong>" +
+      "<p class='small muted'>" + esc(info.format_label || info.format || "") + " &middot; " +
+      num(info.characters, 0) + " characters read. Everything below is in the form for you to check; nothing is designed until you press the button.</p>"];
+    if ((proposal.found || []).length) {
+      html.push("<p class='small'><strong>Filled in for you:</strong></p><ul class='bullets small'>" +
+        proposal.found.map(function (item) {
+          return "<li>" + esc(item.field) + ": <strong>" + esc(item.value) + "</strong> " +
+            "<span class='muted'>(" + (item.how === "model" ? "read by the model" : "read by rule") +
+            (item.evidence ? ": " + esc(item.evidence) : "") + ")</span></li>";
+        }).join("") + "</ul>");
+    }
+    if ((proposal.missing || []).length) {
+      html.push("<p class='small'><strong>The document does not state:</strong></p><ul class='bullets small'>" +
+        proposal.missing.map(function (item) { return "<li>" + esc(item) + "</li>"; }).join("") + "</ul>");
+    }
+    (proposal.notes || []).forEach(function (note) {
+      html.push("<p class='small muted'>" + esc(note) + "</p>");
+    });
+    if ((proposal.model || {}).note) {
+      html.push("<p class='small muted'>" + esc(proposal.model.note) + ".</p>");
+    }
+    html.push("<details><summary class='small'>Show the text that was read</summary><pre class='code'>" +
+      esc(info.text || "") + "</pre></details></div>");
+    holder.innerHTML = html.join("");
+  }
+
   function collectForm() {
     function checked(id) {
       return Array.prototype.slice.call(document.querySelectorAll("#" + id + " input:checked")).map(function (input) { return input.value; });
@@ -485,6 +619,15 @@
       // Off unless the box is ticked, so an unattended run never spends a call.
       use_ai: !!((document.getElementById("f-use-ai") || {}).checked),
       images: state.images.slice(),
+      // Which document the brief was read from, so the record can name it. The bytes
+      // travel again here because this is the moment the file becomes evidence.
+      source_document: state.document ? {
+        name: state.document.name,
+        format: state.document.format,
+        characters: state.document.characters,
+        data_url: state.document.data_url,
+        use_ai: state.document.use_ai
+      } : null,
       plant: {
         name: document.getElementById("p-name").value,
         drying_efficiency: Number(document.getElementById("p-drying").value),
@@ -501,6 +644,7 @@
     withBusy("Understanding the brief and designing v1", "Parsing the specification, generating a formulation, optimising against the models and predicting every characteristic.", function () {
       return api("POST", "/api/products", payload).then(function (result) {
         state.images = [];
+        state.document = null;
         return refreshProducts().then(function () {
           location.hash = "#/product/" + result.product_id + "/overview";
           toast("v1 designed: predicted objective " + num(result.evaluation.objective, 3) +

@@ -386,5 +386,64 @@ class AiInterfaceTests(unittest.TestCase):
         self.assertEqual([name for name in fields if "key" in name.lower()], [])
 
 
+class DocumentUploadUiTests(unittest.TestCase):
+    """The New product form's upload path.
+
+    The R&D team usually has the product written down already, so the form offers the
+    document before it offers the textarea. Four things have to hold in the browser:
+    the upload is offered with the formats the server can really read, what comes back
+    lands in the form instead of being designed straight away, every value says whether
+    a rule or a model read it, and the record is told which document the brief came
+    from - but only while that document is still the one on screen.
+    """
+
+    def setUp(self) -> None:
+        self.app = read(WEB / "app.js")
+
+    def test_the_upload_is_offered_above_the_specification_field(self) -> None:
+        self.assertIn("id='doc-drop'", self.app)
+        self.assertIn("id='doc-file'", self.app)
+        self.assertIn("Choose the document", self.app)
+        self.assertLess(self.app.index("id='doc-drop'"), self.app.index("id='f-spec'"))
+
+    def test_the_form_offers_exactly_what_the_server_can_read(self) -> None:
+        # The accept list and the size limit come from /api/catalog, so the form can
+        # never offer a file that nothing on the server can open.
+        self.assertIn("catalog.documents", self.app)
+        self.assertIn("docInfo.accept", self.app)
+        self.assertIn("docInfo.limit_mb", self.app)
+
+    def test_the_upload_goes_to_the_route_that_reads_it(self) -> None:
+        self.assertIn('api("POST", "/api/brief/from-document"', self.app)
+
+    def test_what_was_read_is_shown_before_anything_is_designed(self) -> None:
+        self.assertIn("Filled in for you", self.app)
+        self.assertIn("The document does not state", self.app)
+        self.assertIn("Show the text that was read", self.app)
+        self.assertIn("nothing is designed until you press the button", self.app)
+
+    def test_every_value_says_whether_a_rule_or_a_model_read_it(self) -> None:
+        self.assertIn('"read by rule"', self.app)
+        self.assertIn('"read by the model"', self.app)
+
+    def test_the_record_is_told_which_document_the_brief_came_from(self) -> None:
+        self.assertIn("source_document:", self.app)
+        self.assertIn("state.document", self.app)
+
+    def test_the_document_claim_is_dropped_when_something_replaces_it(self) -> None:
+        # Loading an example brief, or pressing Clear, replaces what the document
+        # proposed - so the record must not go on claiming the brief came from an upload.
+        self.assertGreaterEqual(self.app.count("state.document = null;"), 3)
+
+    def test_the_pack_field_is_relabelled_when_a_document_fills_it(self) -> None:
+        # A drink's pack field is labelled in ml, and a document may name a drink.
+        self.assertIn('dispatchEvent(new Event("change", { bubbles: true }))', self.app)
+
+    def test_the_guide_says_the_document_can_be_uploaded(self) -> None:
+        guide = read(WEB / "guide.js")
+        self.assertIn("Upload the R&D product report", guide)
+        self.assertIn("read an uploaded R&D document", guide)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

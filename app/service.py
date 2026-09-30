@@ -30,6 +30,8 @@ from .core import brief as brief_module
 from .core import diagnose as diagnose_module
 from .core import doe as doe_module
 from .core import (
+    document_brief,
+    documents,
     engine,
     formulate,
     kb,
@@ -138,6 +140,38 @@ class AgentService:
         self.store = store or Store()
 
     # ------------------------------------------------------------- 1. design #
+    def read_document(
+        self, payload: Dict[str, Any], *, transport: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Read an uploaded R&D document into a proposal for the New product form.
+
+        Nothing is written on the way through: no product row, no ledger entry, and not
+        even the file. The upload is stored when the product it produced is created, so
+        reading somebody's specification sheet into a draft form leaves no trace on the
+        record - which is what makes it safe to try.
+
+        ``transport`` is here for the same reason as on :meth:`create_product`: a test
+        can drive the model path through a fake provider without a socket.
+        """
+        data_url = str(payload.get("data_url") or "")
+        if not data_url:
+            raise ValueError(
+                "A document upload needs its bytes: send data_url, the file as a base64 "
+                "data URL."
+            )
+        raw = documents.decode_data_url(data_url)
+        if raw is None:
+            raise ValueError("The upload is not a readable data URL.")
+        name = str(payload.get("filename") or payload.get("name") or "document")
+        document = documents.extract(name, raw)
+        return document_brief.propose(
+            document,
+            product_name=str(payload.get("product_name") or ""),
+            use_model=bool(payload.get("use_ai")),
+            cache=self.store,
+            transport=transport,
+        )
+
     def create_product(
         self, payload: Dict[str, Any], *, transport: Optional[Any] = None
     ) -> Dict[str, Any]:
@@ -211,6 +245,27 @@ class AgentService:
             ],
         )
         self.store.log(product_id, "understand", f"Brief understood: {brief.product_name} ({brief.category})")
+        # If the brief was read out of an R&D document, the record says which one - and
+        # the file goes into the uploads directory at the moment it becomes evidence, not
+        # when somebody was merely looking at it.
+        source_document = payload.get("source_document") or {}
+        if isinstance(source_document, dict) and str(source_document.get("name") or "").strip():
+            document_name = str(source_document["name"])
+            stored = documents.save_document(
+                document_name, str(source_document.get("data_url") or "")
+            )
+            self.store.log(
+                product_id,
+                "document",
+                f"Brief read from {document_name}",
+                {
+                    "name": document_name,
+                    "format": source_document.get("format"),
+                    "characters": source_document.get("characters"),
+                    "read_with_model": bool(source_document.get("use_ai")),
+                    "stored": stored,
+                },
+            )
         if use_ai:
             self.store.log(
                 product_id,

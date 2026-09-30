@@ -6,12 +6,21 @@ Three rules run through every prompt here.
 else. A caller then validates the reply against those keys rather than trusting it,
 so a model that improvises cannot widen the interface between it and the code.
 
-**The keys are never numbers.** The vision prompt describes appearance; the review
-prompt asks which claims a specification supports; the record prompt answers from
-what is already stored. None of them may write a value that a model produces, because
-a number from a language model is indistinguishable from a measurement once it is in
-the record - and this system's entire claim to credibility is that its numbers are
-reproducible and traceable to a method.
+**The keys are almost never numbers.** The vision prompt describes appearance; the
+review prompt asks which claims a specification supports; the document prompt
+transcribes a name, a category, a diet and registry ids out of a document the team
+already wrote; the record prompt answers from what is already stored. None of them may
+write a value that a model produces, because a number from a language model is
+indistinguishable from a measurement once it is in the record - and this system's
+entire claim to credibility is that its numbers are reproducible and traceable to a
+method.
+
+The exception proves the rule. ``DOCUMENT_KEYS`` allows exactly one number, a *declared*
+pack size, and only when the rule-based parser found none in the same text; it is
+returned with the words it was read from, it is labelled in the interface as read by a
+model rather than parsed by a rule, and it reaches the record only if the person
+prefills-and-confirms it. Every other figure the brief holds is still read by the
+parser out of the specification text on screen.
 
 **The answer is bounded by what it was given.** The record prompt is told that the
 context it receives is the whole of what exists, so "the record does not say" is the
@@ -123,6 +132,75 @@ def spec_review_prompt(spec_text: str, parsed: str, claim_ids: str, allergen_ids
         + spec_text.strip()
         + "\n\nPARSER READING\n"
         + parsed.strip()
+        + "\n\nCLAIM IDS AVAILABLE\n"
+        + claim_ids.strip()
+        + "\n\nALLERGEN IDS AVAILABLE\n"
+        + allergen_ids.strip()
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Reading an uploaded document
+# --------------------------------------------------------------------------- #
+#: The keys a document reading may contain. This prompt is a *transcription* task, and
+#: the rule is kept honest by what the keys allow: a name, a category, a diet, ids that
+#: already exist in the claim and allergen registries, the words a declared pack size
+#: was read from, and a list of what the document does not say. There is no key for a
+#: target, a property or an ingredient, because the parser reads the specification text
+#: itself and every number in the brief has to come from there.
+DOCUMENT_KEYS = (
+    "product_name",
+    "category",
+    "diet",
+    "claims",
+    "allergens_avoided",
+    "pack_size",
+    "pack_unit",
+    "pack_evidence",
+    "missing",
+    "confidence",
+)
+
+DOCUMENT_PROMPT_TEMPLATE = compose(
+    """
+An R&D team sent the document below instead of filling in a form. A rule-based parser
+has already read it, and its reading is shown to you. Report only what the parser did
+not find, quoting the document's own words as evidence.
+
+Keys:
+- product_name: the product's name, as the document writes it, if the document names one.
+- category: exactly one id from the category ids listed in the request, or omit it.
+- diet: one of "vegetarian", "vegan" or "any", only if the document states it.
+- claims: list of objects with "id" and "evidence". "id" must be one of the claim ids
+  listed in the request; "evidence" is the words from the document that support it.
+- allergens_avoided: list of objects with "id" and "evidence", using only the allergen
+  ids listed in the request.
+- pack_size: a number, only if the document states the pack or serving size and the
+  parser's reading does not already show one. pack_unit: "g" or "ml", matching it.
+- pack_evidence: the exact words the pack size was read from.
+- missing: list of short strings - the facts a formulation team needs that this
+  document does not state at all. Notes for a human, not guesses.
+- confidence: a number between 0 and 1 for the reading as a whole.
+
+Do not propose a target value, a measured property (protein, sugar, moisture, cost) or
+an ingredient: the parser reads the specification text and the models predict the
+properties. If the document does not state something, put it in "missing" instead of
+filling it in.
+"""
+)
+
+
+def document_prompt(
+    text: str, category_ids: str, claim_ids: str, allergen_ids: str, parsed: str
+) -> str:
+    """The document, then the parser's reading of it, then the vocabularies it may use."""
+    return (
+        "DOCUMENT TEXT" + "\n"
+        + text.strip()
+        + "\n\nPARSER READING\n"
+        + parsed.strip()
+        + "\n\nCATEGORY IDS AVAILABLE\n"
+        + category_ids.strip()
         + "\n\nCLAIM IDS AVAILABLE\n"
         + claim_ids.strip()
         + "\n\nALLERGEN IDS AVAILABLE\n"
