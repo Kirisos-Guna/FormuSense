@@ -11,6 +11,7 @@ Runs on the Python standard library only::
     python run.py --report       # write the internship report and exit
     python run.py --slides       # write the presentation (PPTX) and exit
     python run.py --slides --preview  # ...and an HTML rendition to look at it in a browser
+    python run.py --icmr-export  # write the ICMR-NIN 2020 reference set (XLSX and CSV) and exit
     python run.py --build-dataset  # build the acceptance dataset (offline, no API key)
     python run.py --train          # train and evaluate the acceptance model
     python run.py --train-report   # print the metrics of the latest trained model
@@ -87,6 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="write the presentation (PPTX) from the record, then exit",
     )
     parser.add_argument(
+        "--icmr-export",
+        action="store_true",
+        help=(
+            "write the ICMR-NIN 2020 population reference set as a spreadsheet "
+            "(XLSX and CSV), then exit"
+        ),
+    )
+    parser.add_argument(
         "--preview",
         action="store_true",
         help="also write an HTML rendition of the presentation, to review it in a browser",
@@ -94,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out",
         default=None,
-        help="directory for --report and --slides (default: report/)",
+        help="directory for --report, --slides and --icmr-export (default: report/)",
     )
     parser.add_argument(
         "--no-tests",
@@ -257,6 +266,19 @@ def main() -> int:
         print(f"  blocks   : {result['blocks']}")
         print(f"  figures  : {result['figures']}")
         print(f"  listings : {result['listings']}")
+        for kind, path in result["paths"].items():
+            print(f"  {kind:8s} : {path}")
+        return 0
+
+    if args.icmr_export:
+        from pathlib import Path as _Path
+
+        from app.icmr_export import generate as export_reference
+
+        print("Writing the ICMR-NIN 2020 population reference set...")
+        result = export_reference(out_dir=_Path(args.out) if args.out else None)
+        print(f"  sheets   : {', '.join(result['sheets'])}")
+        print(f"  groups   : {result['groups']} population groups, {result['columns']} columns")
         for kind, path in result["paths"].items():
             print(f"  {kind:8s} : {path}")
         return 0

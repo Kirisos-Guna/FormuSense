@@ -126,6 +126,29 @@ def source_note() -> Dict[str, Any]:
     }
 
 
+def dataset_meta() -> Dict[str, Any]:
+    """How the data file describes itself: name, provenance, units and key values.
+
+    :func:`source_note` is the short form the interface and the report quote;
+    this is the whole of the file's ``_meta``, which is what an export needs - a
+    spreadsheet that leaves the application has to carry its own citation, its own
+    units and its own caveats, or a reader cannot check a single number in it.
+    """
+    meta = _raw()["_meta"]
+    return {
+        "name": meta["name"],
+        "version": meta["version"],
+        "source": meta["source"],
+        "disclaimer": meta["disclaimer"],
+        "units": dict(meta.get("units", {})),
+        "key_values": dict(meta.get("key_values", {})),
+        "protein_energy_pct_range": list(
+            meta.get("protein_energy_pct_range", [10.0, 15.0])
+        ),
+        "practical_upper_g_kg_day": float(meta.get("practical_upper_g_kg_day", 2.0)),
+    }
+
+
 def practical_upper_g_day(entry: DriProfile) -> float:
     """Practical daily upper intake for a group, in grams of protein.
 
